@@ -310,18 +310,20 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     const widthFactor = 0.35 + clamp01((sketchParameters.peelRibbonWidth - 0.10) / 0.45) * 0.65;
     const bandWidthPixels = state.latitudeStep * Math.PI * appleBaseRadius * 1.05;
     const coilWidth = bandWidthPixels * widthFactor;
-    // 果肉だけの帯は果皮のクチクラ層による反りがなく、切削で生じる反りだけになるため丸まりが弱い
+    // 果肉だけの帯は張りのある果皮 (クチクラ層) を持たず柔らかいため、元の曲率を保ちにくくゆるく巻く
     const materialCurl = state.isFleshPeel ? 0.6 : 1.0;
     const coilGap = 4 + 3 * curlIntensity;
     const cupDepth = 3 * curlIntensity * materialCurl;
-    // カールが強いほど垂れ下がる螺旋の半径が小さく巻きがきつくなる
-    const coilRadius = appleBaseRadius * 0.5 / (0.6 + 0.35 * curlIntensity) / materialCurl;
+    // 剥いた帯はりんご表面の曲がりを覚えたまま、元の表面 (果皮) を外側にして巻く。
+    // カールが強いほど元の曲率を強く保ち、垂れ下がる螺旋の半径が小さくなる
+    const coilRadius = appleBaseRadius * 0.8 / (0.6 + 0.35 * curlIntensity) / materialCurl;
     const detachTurns = 0.3;
 
     // 垂れ下がりの起点 = ナイフ位置 (剥き終わり後はその位置で固定し、そこから落下させる)
     const anchorTau = Math.min(state.knifeTau, mesh.tauEnd);
     const anchorLatitude = (bandLatitude(anchorTau, 0, state.latitudeStep) + bandLatitude(anchorTau, 1, state.latitudeStep)) * 0.5;
     const anchorHeight = appleUnitPoint(anchorLatitude, 0)[1] * appleBaseRadius;
+    const appleBottomHeight = appleUnitPoint(1, 0)[1] * appleBaseRadius;
     const anchorLongitude = anchorTau * TWO_PI;
     const outward = [Math.sin(anchorLongitude), 0, Math.cos(anchorLongitude)];
     const forward = [Math.cos(anchorLongitude), 0, -Math.sin(anchorLongitude)]; // 経度が増える (刃が進む) 向き
@@ -345,7 +347,7 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
         const geodesicCurvature = getAppleGeodesicCurvature(centerLatitude) / appleBaseRadius;
         // 自然な半径は皮ごとにばらつき、自由端へ向かって緩んで広がる
         const looseness = 1 + 0.35 * smoothStep(0.0, 1.0, turnsBehind / Math.max(totalTurns, 2));
-        const naturalRadius = coilRadius * (0.3 + 0.7 * smoothStep(0.0, 1.2, turnsBehind))
+        const naturalRadius = coilRadius
             * (1 + 0.22 * peelMaterialNoise(sample.tau, 1)) * looseness;
         // 剥き始め (りんごの頂部) の先端は細い
         const stripWidth = coilWidth * (0.45 + 0.55 * smoothStep(0.0, 0.8, turnsFromFreeEnd));
@@ -379,22 +381,23 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
         const turnsBehind = anchorTau - sample.tau;
         const { radius: growingCoilRadius, flareAngle, stripWidth } = coilShapes[sampleIndex];
         const detach = smoothStep(0.0, detachTurns, turnsBehind);
-        // ナイフ位置から刃の後方へ巻きながら垂れ下がる螺旋 (軸はナイフ側に寄り、りんごの外側に沿う)
+        // ナイフ位置から刃の後方へ、りんごの周回と同じ向きに巻きながら垂れ下がる螺旋 (軸はりんご側)
         const coilAngle = turnsBehind * TWO_PI;
-        // 刃の直後は重力でまっすぐ垂れ、離れるほど螺旋の半径が育つ
-        const initialDrop = appleBaseRadius * 0.55 * (1 - Math.exp(-turnsBehind / 0.35));
+        // 刃の直後は重力でまっすぐ垂れ、りんごの下まで落ちてから巻き始める
+        const initialDrop = Math.max(appleBaseRadius * 0.55, appleBottomHeight + appleBaseRadius * 0.12 - anchorHeight)
+            * (1 - Math.exp(-turnsBehind / 0.35));
         const hangDepth = hangHeights[sampleIndex] + initialDrop;
         const coilCenterHeight = anchorHeight + hangDepth;
-        const radialUnit = vec3Add(vec3Scale(outward, Math.cos(coilAngle)), vec3Scale(forward, Math.sin(coilAngle)));
+        const radialUnit = vec3Sub(vec3Scale(outward, Math.cos(coilAngle)), vec3Scale(forward, Math.sin(coilAngle)));
         // 巻きの断面をわずかに楕円にし、向きも皮ごとに変える
         const ovality = 1 + 0.14 * Math.sin(2 * coilAngle + 2.5 * peelMaterialNoise(sample.tau, 4));
-        // 螺旋軸の位置は帯の幅全体で共通 (帯がかかる高さ範囲でのりんごの最大半径の外側)
+        // 螺旋軸の位置は帯の幅全体で共通 (巻きの手前側が、帯がかかる高さ範囲でのりんごの最大半径の外側に来る)
         const halfSpan = stripWidth * 0.5;
         let appleRadiusAround = 0;
         for (const offset of [-halfSpan, 0, halfSpan]) {
             appleRadiusAround = Math.max(appleRadiusAround, getAppleUnitRadiusAtHeight((coilCenterHeight + offset) / appleBaseRadius));
         }
-        const axisDistance = appleRadiusAround * appleBaseRadius + growingCoilRadius + coilGap;
+        const axisDistance = appleRadiusAround * appleBaseRadius + coilGap - growingCoilRadius;
         // 軸の曲がり: 深いほど後方へ遅れ、揺れも大きい
         const depthRatio = clamp01(hangDepth / (appleBaseRadius * 2.6));
         const trail = -appleBaseRadius * 0.24 * Math.pow(depthRatio, 1.3);
@@ -415,9 +418,9 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
             const coilHeight = coilCenterHeight - across * stripWidth * Math.cos(flareAngle);
             const localRadius = growingCoilRadius * ovality + across * stripWidth * Math.sin(flareAngle) + cupDepth * (1 - 4 * across * across);
             const coilPoint = [
-                outward[0] * axisDistance - radialUnit[0] * localRadius + axisOffset[0],
+                outward[0] * axisDistance + radialUnit[0] * localRadius + axisOffset[0],
                 coilHeight,
-                outward[2] * axisDistance - radialUnit[2] * localRadius + axisOffset[2]
+                outward[2] * axisDistance + radialUnit[2] * localRadius + axisOffset[2]
             ];
 
             // 円柱座標 (りんご中心軸まわりの角度・半径・高さ) で補間し、本体内部を横切らないようにする
