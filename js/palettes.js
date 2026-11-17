@@ -37,6 +37,61 @@ const applicationColorPalettes = [
         textureStyle: "apple"
     },
     {
+        title: "みかん",
+        comment: "油胞の目立つ橙の果皮と房の筋",
+        colors: [
+            { name: "Dusk", hex: "#14100B", rgb: [20, 16, 11] },
+            { name: "Mandarin", hex: "#EE8A1E", rgb: [238, 138, 30] },
+            { name: "Segment", hex: "#F8B451", rgb: [248, 180, 81] },
+            { name: "Calyx Green", hex: "#4E5A2A", rgb: [78, 90, 42] }
+        ],
+        textureStyle: "citrus"
+    },
+    {
+        title: "梨",
+        comment: "果点の密な黄褐色の果皮とざらつく果肉",
+        colors: [
+            { name: "Umber Night", hex: "#13110D", rgb: [19, 17, 13] },
+            { name: "Nashi Gold", hex: "#C59D58", rgb: [197, 157, 88] },
+            { name: "Pear Flesh", hex: "#F7F1DA", rgb: [247, 241, 218] },
+            { name: "Stem Brown", hex: "#5A3E22", rgb: [90, 62, 34] }
+        ],
+        textureStyle: "pear"
+    },
+    {
+        title: "柿",
+        comment: "艶のある朱色の果皮とゴマの入った果肉",
+        colors: [
+            { name: "Persimmon Night", hex: "#150F0B", rgb: [21, 15, 11] },
+            { name: "Kaki Orange", hex: "#E3651B", rgb: [227, 101, 27] },
+            { name: "Kaki Flesh", hex: "#F2A043", rgb: [242, 160, 67] },
+            { name: "Calyx Green", hex: "#3F4A22", rgb: [63, 74, 34] }
+        ],
+        textureStyle: "persimmon"
+    },
+    {
+        title: "じゃがいも",
+        comment: "芽と網目のある土色の皮と淡黄の中身",
+        colors: [
+            { name: "Soil", hex: "#120F0C", rgb: [18, 15, 12] },
+            { name: "Potato Skin", hex: "#A47A4E", rgb: [164, 122, 78] },
+            { name: "Potato Flesh", hex: "#F1E2A4", rgb: [241, 226, 164] },
+            { name: "Sprout", hex: "#7A6A3A", rgb: [122, 106, 58] }
+        ],
+        textureStyle: "potato"
+    },
+    {
+        title: "キウイ",
+        comment: "毛羽立つ茶色の皮と黒い種の緑の果肉",
+        colors: [
+            { name: "Moss Night", hex: "#0F120D", rgb: [15, 18, 13] },
+            { name: "Kiwi Fuzz", hex: "#8A6A3F", rgb: [138, 106, 63] },
+            { name: "Kiwi Green", hex: "#86B83A", rgb: [134, 184, 58] },
+            { name: "Stem Brown", hex: "#4A3520", rgb: [74, 53, 32] }
+        ],
+        textureStyle: "kiwi"
+    },
+    {
         title: "Retro Sunny Living",
         comment: "レトロで温かみのある暖色",
         colors: [
