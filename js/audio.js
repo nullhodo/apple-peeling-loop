@@ -6,24 +6,17 @@
  */
 function initializeAudioSynthesizers() {
     try {
-        // シャリシャリと皮を剥く摩擦音を再現するバンドパスノイズシンセ
+        // シャリシャリと皮を剥く摩擦音: 連続するピンクノイズをバンドパスに通し、剥いている間だけ音量を上げる
+        peelingGain = new Tone.Gain(0).toDestination();
         peelingFilter = new Tone.Filter({
             frequency: 3200,
             type: "bandpass",
             Q: 2.5
-        }).toDestination();
+        }).connect(peelingGain);
+        peelingNoiseSource = new Tone.Noise("pink").connect(peelingFilter);
+        peelingNoiseSource.start();
 
-        peelingNoiseSynth = new Tone.NoiseSynth({
-            noise: { type: "pink" },
-            envelope: {
-                attack: 0.08,
-                decay: 0.15,
-                sustain: 0.6,
-                release: 0.3
-            }
-        }).connect(peelingFilter);
-
-        // 果肉と皮のレイヤーが切り替わる際の澄んだレゾナンス・ポップ音
+        // 剥き終わった皮が切れて離れる瞬間の澄んだポップ音
         recursionPopSynth = new Tone.MembraneSynth({
             pitchDecay: 0.05,
             octaves: 3,
@@ -36,7 +29,7 @@ function initializeAudioSynthesizers() {
             }
         }).toDestination();
 
-        Tone.Destination.volume.value = -12;
+        Tone.Destination.volume.value = Number(document.getElementById('slider-volume').value);
         isAudioEngineStarted = true;
         console.log("[Audio Engine] Tone.js synthesizers initialized successfully.");
     } catch (error) {
@@ -45,23 +38,41 @@ function initializeAudioSynthesizers() {
 }
 
 /**
- * ループアニメーションの進行に応じて皮むき音を連続変調させる関数
- * @param {number} loopPhase (0.0 - 1.0)
+ * 描画状態に同期して皮むき音を制御する関数
+ * 剥いている間だけ摩擦音を鳴らし (外皮は高く硬い音 / 果肉は低く柔らかい音)、
+ * 皮が切れて落ち始める瞬間にポップ音を1回鳴らす
+ * @param {object} state computePeelSceneState の戻り値
  */
-function updatePeelingAudioFeedback(loopPhase) {
-    if (!isAudioEngineStarted || isPeelingAudioMuted) return;
+function updatePeelingAudioFeedback(state) {
+    if (!isAudioEngineStarted) return;
 
     try {
-        // 剥きの進行に合わせてフィルタ周波数を微妙に変化させ、リアルな摩擦感を演出
-        const modulatedFrequency = 2400 + Math.sin(loopPhase * Math.PI * sketchParameters.spiralTurnCount * 4) * 1100;
-        peelingFilter.frequency.rampTo(modulatedFrequency, 0.05);
-
-        // 0.5 (皮から果肉) および 1.0 (果肉から新皮) の切り替わりでポップ音を発音
-        const currentHalfPhaseIndex = Math.floor(loopPhase * 2);
-        if (currentHalfPhaseIndex !== lastPlayedHalfPhaseIndex) {
-            lastPlayedHalfPhaseIndex = currentHalfPhaseIndex;
-            recursionPopSynth.triggerAttackRelease(currentHalfPhaseIndex === 1 ? "G4" : "C5", "8n");
+        const isPeeling = state.releaseProgress <= 0 && state.peelProgress > 0;
+        if (isPeelingAudioMuted) {
+            peelingGain.gain.rampTo(0, 0.05);
+            lastAudioPeelingState = null; // 再開直後に古い状態からポップ音が鳴らないようにする
+            return;
         }
+
+        if (isPeeling) {
+            // ナイフの回転に合わせて刃当たりの強さと音色がわずかに揺らぎ、毎フレームの微小な乱れでザラつきを出す
+            const strokeWobble = Math.sin(state.knifeLongitude * 2.0);
+            const baseLevel = state.isFleshPeel ? 0.55 : 0.9;
+            const level = baseLevel * (0.78 + 0.22 * strokeWobble) * (0.85 + 0.3 * Math.random());
+            const centerFrequency = state.isFleshPeel ? 1900 : 3600;
+            peelingFilter.Q.rampTo(state.isFleshPeel ? 1.4 : 2.8, 0.05);
+            peelingFilter.frequency.rampTo(centerFrequency * (1 + 0.18 * strokeWobble), 0.05);
+            peelingGain.gain.rampTo(level, 0.04);
+        } else {
+            peelingGain.gain.rampTo(0, 0.08);
+        }
+
+        const halfIndex = state.isFleshPeel ? 1 : 0;
+        if (lastAudioPeelingState && lastAudioPeelingState.isPeeling && !isPeeling
+            && lastAudioPeelingState.halfIndex === halfIndex && state.releaseProgress > 0) {
+            recursionPopSynth.triggerAttackRelease(state.isFleshPeel ? "G4" : "C5", "8n");
+        }
+        lastAudioPeelingState = { isPeeling, halfIndex };
     } catch (audioException) {
         // Ignore transient audio scheduling hiccups
     }

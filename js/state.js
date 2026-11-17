@@ -57,10 +57,11 @@ let renderedVertexCount = 0;
 // Audio Engine (Tone.js Synthetic ASMR Peeler)
 let isAudioEngineStarted = false;
 let isPeelingAudioMuted = true;
-let peelingNoiseSynth = null;
+let peelingNoiseSource = null;
 let peelingFilter = null;
+let peelingGain = null;
 let recursionPopSynth = null;
-let lastPlayedHalfPhaseIndex = 0;
+let lastAudioPeelingState = null;
 
 // Periodic Randomization Interval Variable
 let autoRandomTimerId = null;
