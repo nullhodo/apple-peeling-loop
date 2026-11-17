@@ -18,7 +18,7 @@ function executeSelectiveRandomization() {
     }
 
     if (shouldRandomizeSpeed) {
-        sketchParameters.loopDurationMilliseconds = Math.round(random(3500, 9500) / 500) * 500;
+        sketchParameters.knifeTurnsPerSecond = Number((random(0.5, 2.0)).toFixed(1));
         sketchParameters.autoRotationSpeed = Number((random(-2.0, 2.5)).toFixed(1));
     }
 

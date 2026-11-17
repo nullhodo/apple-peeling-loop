@@ -3,7 +3,7 @@
    ========================================================================== */
 // Configuration & Parameters State
 let sketchParameters = {
-    loopDurationMilliseconds: 6000,
+    knifeTurnsPerSecond: 1.0, // ナイフが1秒あたりに回る平均周数 (ループ周期は巻き数とこの値から算出)
     spiralTurnCount: 8.0,
     peelRibbonWidth: 0.28,
     peelCurlCurvature: 1.20,
@@ -21,6 +21,10 @@ let sketchParameters = {
     knifeScale: 1.0,
     knifeMotionMode: "moving" // "moving" (ナイフが巡る) または "fixed" (ナイフ固定でリンゴ回転)
 };
+
+// Loop Clock (周期が変わっても位相が連続するよう時刻オフセットを保持)
+let loopClockDurationMilliseconds = null;
+let loopClockOffsetMilliseconds = 0;
 
 // Undo & Redo History Buffers
 const undoHistoryStack = [];

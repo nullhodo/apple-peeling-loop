@@ -77,15 +77,15 @@
                 <i class="fa-solid fa-circle-notch"></i> ループ & 幾何学パラメータ
             </h2>
             
-            <!-- Loop Duration -->
+            <!-- Knife Speed (ループ周期は巻き数と速さから算出) -->
             <div class="mb-3.5 has-tooltip relative">
                 <div class="flex justify-between text-xs mb-1">
-                    <span>1ループ周期 (ms)</span>
-                    <span id="label-loop-duration" class="font-mono text-amber-300">6000</span>
+                    <span>ナイフの速さ (周/秒)</span>
+                    <span class="font-mono text-amber-300"><span id="label-knife-speed">1</span> <span class="text-slate-500">· 1ループ <span id="label-loop-duration">19.0</span>s</span></span>
                 </div>
-                <input id="slider-loop-duration" type="range" min="2000" max="14000" step="500" value="6000" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500">
+                <input id="slider-knife-speed" type="range" min="0.2" max="4.0" step="0.1" value="1.0" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500">
                 <div class="tooltip-box absolute left-0 -top-8 bg-slate-800 text-xs px-2 py-1 rounded shadow border border-slate-700 pointer-events-none z-50">
-                    皮が1周剥け終わり次のりんごに繋がるまでの時間
+                    ナイフがりんごを1秒に回る平均周数 (外皮と果肉を剥き終えて元に戻るまでが1ループ)
                 </div>
             </div>
 

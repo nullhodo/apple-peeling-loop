@@ -45,7 +45,12 @@ function setupUserInterfaceEventListeners() {
     });
 
     // スライダー群のイベントバインディング
-    bindSliderToParameter('slider-loop-duration', 'label-loop-duration', 'loopDurationMilliseconds', true);
+    bindSliderToParameter('slider-knife-speed', 'label-knife-speed', 'knifeTurnsPerSecond', false);
+    // 速さ・巻き数を変えるとループ周期が変わるため、周期表示も更新する
+    for (const sliderId of ['slider-knife-speed', 'slider-spiral-turns']) {
+        document.getElementById(sliderId).addEventListener('input', refreshLoopDurationLabel);
+    }
+    refreshLoopDurationLabel();
     bindSliderToParameter('slider-spiral-turns', 'label-spiral-turns', 'spiralTurnCount', false);
     bindSliderToParameter('slider-peel-width', 'label-peel-width', 'peelRibbonWidth', false);
     bindSliderToParameter('slider-peel-curl', 'label-peel-curl', 'peelCurlCurvature', false);
@@ -195,11 +200,19 @@ function bindColorPickerToParameter(pickerId, labelId, parameterKey, shouldRegen
 }
 
 /**
+ * 巻き数とナイフの速さから決まるループ周期 (秒) を表示する関数
+ */
+function refreshLoopDurationLabel() {
+    document.getElementById('label-loop-duration').innerText = (getLoopDurationMilliseconds() / 1000).toFixed(1);
+}
+
+/**
  * スケッチパラメータの変更を全UI要素に反映・同期する関数
  */
 function synchronizeControlsFromParameters() {
-    document.getElementById('slider-loop-duration').value = sketchParameters.loopDurationMilliseconds;
-    document.getElementById('label-loop-duration').innerText = sketchParameters.loopDurationMilliseconds;
+    document.getElementById('slider-knife-speed').value = sketchParameters.knifeTurnsPerSecond;
+    document.getElementById('label-knife-speed').innerText = sketchParameters.knifeTurnsPerSecond;
+    refreshLoopDurationLabel();
 
     document.getElementById('slider-spiral-turns').value = sketchParameters.spiralTurnCount;
     document.getElementById('label-spiral-turns').innerText = sketchParameters.spiralTurnCount;

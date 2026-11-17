@@ -77,7 +77,15 @@ function importParametersFromJsonFile(fileObject) {
             const parsedConfiguration = JSON.parse(event.target.result);
             if (parsedConfiguration.parameters) {
                 pushUndoSnapshot();
-                sketchParameters = Object.assign({}, sketchParameters, parsedConfiguration.parameters);
+                const importedParameters = Object.assign({}, parsedConfiguration.parameters);
+                // 旧形式 (ループ周期を直接保存) はナイフの速さへ換算する
+                if (importedParameters.knifeTurnsPerSecond === undefined && importedParameters.loopDurationMilliseconds) {
+                    const turnCount = importedParameters.spiralTurnCount || sketchParameters.spiralTurnCount;
+                    const peelSeconds = importedParameters.loopDurationMilliseconds / 1000 / 2 * PEEL_PORTION_OF_HALF_PHASE;
+                    importedParameters.knifeTurnsPerSecond = Number((turnCount / peelSeconds).toFixed(1));
+                }
+                delete importedParameters.loopDurationMilliseconds;
+                sketchParameters = Object.assign({}, sketchParameters, importedParameters);
                 synchronizeControlsFromParameters();
                 generateProceduralTextures();
                 console.log("[JSON Import] Sketch parameters successfully restored.");

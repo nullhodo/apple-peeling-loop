@@ -19,12 +19,36 @@ function hermiteInterpolate(start, end, startVelocity, endVelocity, t) {
 }
 
 /**
+ * 1ループ (外皮 + 果肉の2回の剥離) の周期を、巻き数とナイフの速さから求める関数
+ * ナイフは1回の剥離で τ = -1 〜 K-1 の K 周を回り、半周期のうち PEEL_PORTION_OF_HALF_PHASE を剥離に使う
+ */
+function getLoopDurationMilliseconds() {
+    const turnsPerSecond = Math.max(0.05, sketchParameters.knifeTurnsPerSecond);
+    const peelSeconds = sketchParameters.spiralTurnCount / turnsPerSecond;
+    return 2 * peelSeconds / PEEL_PORTION_OF_HALF_PHASE * 1000;
+}
+
+/**
+ * 時刻からループ位相 (0-1) を求める関数
+ * 速さや巻き数の変更で周期が変わっても、その瞬間の位相を保つよう時刻オフセットを付け替える
+ */
+function computeLoopPhase(timeMilliseconds) {
+    const duration = getLoopDurationMilliseconds();
+    const wrap = (time, period) => (((time % period) + period) % period) / period;
+    if (loopClockDurationMilliseconds !== null && loopClockDurationMilliseconds !== duration) {
+        const currentPhase = wrap(timeMilliseconds + loopClockOffsetMilliseconds, loopClockDurationMilliseconds);
+        loopClockOffsetMilliseconds = currentPhase * duration - timeMilliseconds;
+    }
+    loopClockDurationMilliseconds = duration;
+    return wrap(timeMilliseconds + loopClockOffsetMilliseconds, duration);
+}
+
+/**
  * 時刻から描画状態 (剥離進行度・ナイフ位置・スケール等) を算出する関数
  * @param {number} timeMilliseconds
  */
 function computePeelSceneState(timeMilliseconds) {
-    const loopDuration = sketchParameters.loopDurationMilliseconds;
-    const loopPhase = (timeMilliseconds % loopDuration) / loopDuration;
+    const loopPhase = computeLoopPhase(timeMilliseconds);
     const isFleshPeel = loopPhase >= 0.5;
     const localPhase = isFleshPeel ? (loopPhase - 0.5) * 2.0 : loopPhase * 2.0;
 

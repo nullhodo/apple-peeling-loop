@@ -37,17 +37,17 @@ function draw() {
 
     // 1. ループ進行度 (loopPhase: 0.0 - 1.0) の算出
     const currentTimestamp = millis();
-    const loopPhase = (currentTimestamp % sketchParameters.loopDurationMilliseconds) / sketchParameters.loopDurationMilliseconds;
+    const sceneState = computePeelSceneState(currentTimestamp);
+    const loopPhase = sceneState.loopPhase;
 
     // オーディオ同期
-    updatePeelingAudioFeedback(loopPhase);
+    updatePeelingAudioFeedback(sceneState);
 
     // 2. 背景描画
     const backgroundRgb = convertHexToRgb(sketchParameters.backgroundColorHex);
     background(backgroundRgb.r, backgroundRgb.g, backgroundRgb.b);
 
     // 3-5. ライティング・視点制御・りんご本体 (剥離厚みと釣り合う微小スケール拡大でシームレスループ)
-    const sceneState = computePeelSceneState(currentTimestamp);
     renderAppleScene(p5.instance, sceneState, currentTimestamp, width, height);
     const balancedScaleFactor = sceneState.balancedScale;
 
@@ -64,7 +64,7 @@ function draw() {
     // 8. ループ指定録画の進行監視
     if (isRecordingActive && targetRecordingLoopCount > 0) {
         const totalRecordingElapsedTime = currentTimestamp - recordingStartTimestamp;
-        const targetDurationLimit = targetRecordingLoopCount * sketchParameters.loopDurationMilliseconds;
+        const targetDurationLimit = targetRecordingLoopCount * getLoopDurationMilliseconds();
         if (totalRecordingElapsedTime >= targetDurationLimit) {
             console.log(`[Recorder] Exact ${targetRecordingLoopCount} loops reached. Stopping recording.`);
             stopRecordingPipeline();
