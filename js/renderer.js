@@ -219,13 +219,14 @@ function readSpiralSample(mesh, row, sample) {
 
 /**
  * テクスチャと材質 (艶) を設定する関数
- * 果皮はロウ質の鋭い艶、果肉は水分による柔らかい艶を持たせる
+ * 果皮は質感ごとの艶 (りんごはロウ質の鋭い艶)、果肉は水分による柔らかい艶を持たせる
  */
 function applyAppleSurfaceMaterial(g, surfaceTexture) {
     g.texture(surfaceTexture);
     if (surfaceTexture === appleSkinProceduralTexture) {
-        g.specularMaterial(...toneForColorScheme(110, 105, 100));
-        g.shininess(38);
+        const gloss = SURFACE_TEXTURE_STYLES[getActiveSurfaceTextureStyleKey()].gloss;
+        g.specularMaterial(...toneForColorScheme(30 + 80 * gloss, 30 + 75 * gloss, 30 + 70 * gloss));
+        g.shininess(8 + 30 * gloss);
     } else {
         g.specularMaterial(...toneForColorScheme(70, 70, 62));
         g.shininess(14);

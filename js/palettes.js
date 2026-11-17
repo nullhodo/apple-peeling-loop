@@ -11,7 +11,8 @@ const applicationColorPalettes = [
             { name: "Apple Red", hex: "#C81D25", rgb: [200, 29, 37] },
             { name: "Cream Flesh", hex: "#F6EBC6", rgb: [246, 235, 198] },
             { name: "Stem Brown", hex: "#57361E", rgb: [87, 54, 30] }
-        ]
+        ],
+        textureStyle: "apple"
     },
     {
         title: "青りんご",
@@ -21,7 +22,8 @@ const applicationColorPalettes = [
             { name: "Apple Green", hex: "#8CBF3F", rgb: [140, 191, 63] },
             { name: "Pale Flesh", hex: "#F1F3D3", rgb: [241, 243, 211] },
             { name: "Stem Brown", hex: "#6B4A2B", rgb: [107, 74, 43] }
-        ]
+        ],
+        textureStyle: "apple"
     },
     {
         title: "白黒リンゴ",
@@ -31,7 +33,8 @@ const applicationColorPalettes = [
             { name: "Black", hex: "#000000", rgb: [0, 0, 0] },
             { name: "White", hex: "#FFFFFF", rgb: [255, 255, 255] },
             { name: "Black", hex: "#000000", rgb: [0, 0, 0] }
-        ]
+        ],
+        textureStyle: "apple"
     },
     {
         title: "Retro Sunny Living",
@@ -649,6 +652,11 @@ function applyColorPaletteByIndex(paletteIndex) {
     if (!targetPalette) return;
 
     sketchParameters.activePaletteTitle = targetPalette.title;
+    // 果物・野菜のパレットは質感も切り替える (その他の配色は今の質感のまま)
+    if (targetPalette.textureStyle) {
+        sketchParameters.surfaceTextureStyle = targetPalette.textureStyle;
+        updateSurfaceTextureStyleUI();
+    }
     const availableColors = targetPalette.colors.map(item => item.hex);
 
     // 背景色をパレットの先頭色に設定

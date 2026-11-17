@@ -26,6 +26,21 @@ function setupUserInterfaceEventListeners() {
 
         paletteSelectElement.appendChild(optionElement);
     });
+    // 質感ドロップダウン (パレットとは独立して選べる)
+    const textureStyleSelectElement = document.getElementById('select-texture-style');
+    Object.entries(SURFACE_TEXTURE_STYLES).forEach(([styleKey, style]) => {
+        const optionElement = document.createElement('option');
+        optionElement.value = styleKey;
+        optionElement.innerText = style.label;
+        textureStyleSelectElement.appendChild(optionElement);
+    });
+    textureStyleSelectElement.value = getActiveSurfaceTextureStyleKey();
+    textureStyleSelectElement.addEventListener('change', (event) => {
+        pushUndoSnapshot();
+        sketchParameters.surfaceTextureStyle = event.target.value;
+        generateProceduralTextures();
+    });
+
     paletteSelectElement.addEventListener('change', (event) => {
         applyColorPaletteByIndex(Number(event.target.value));
     });
@@ -252,6 +267,11 @@ function synchronizeControlsFromParameters() {
 
     updateKnifeMotionModeUI();
     updateColorPickerInputsUI();
+    updateSurfaceTextureStyleUI();
+}
+
+function updateSurfaceTextureStyleUI() {
+    document.getElementById('select-texture-style').value = getActiveSurfaceTextureStyleKey();
 }
 
 /**

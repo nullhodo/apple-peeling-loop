@@ -15,6 +15,7 @@ let sketchParameters = {
     appleFleshColorHex: "#f6ebc6",
     appleStemColorHex: "#57361e",
     activePaletteTitle: "普通のリンゴ",
+    surfaceTextureStyle: "apple", // 果皮・果肉の模様の種類 (SURFACE_TEXTURE_STYLES のキー)
     autoRandomEnabled: false,
     autoRandomIntervalMilliseconds: 12000,
     isKnifeVisible: true,
