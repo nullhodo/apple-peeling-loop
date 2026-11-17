@@ -56,7 +56,8 @@ let renderedVertexCount = 0;
 
 // Audio Engine (Tone.js Synthetic ASMR Peeler)
 let isAudioEngineStarted = false;
-let isPeelingAudioMuted = true;
+let isPeelingAudioMuted = false; // 既定でオン (ブラウザの自動再生制限により最初の操作で発音を開始)
+let isReleasePopSoundEnabled = false; // 皮が切れる瞬間のポップ音 (既定でオフ)
 let peelingNoiseSource = null;
 let peelingFilter = null;
 let peelingGain = null;

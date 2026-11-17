@@ -68,7 +68,7 @@ function updatePeelingAudioFeedback(state) {
         }
 
         const halfIndex = state.isFleshPeel ? 1 : 0;
-        if (lastAudioPeelingState && lastAudioPeelingState.isPeeling && !isPeeling
+        if (isReleasePopSoundEnabled && lastAudioPeelingState && lastAudioPeelingState.isPeeling && !isPeeling
             && lastAudioPeelingState.halfIndex === halfIndex && state.releaseProgress > 0) {
             recursionPopSynth.triggerAttackRelease(state.isFleshPeel ? "G4" : "C5", "8n");
         }

@@ -90,26 +90,20 @@ function setupUserInterfaceEventListeners() {
 
     // サウンドトグル & ボリューム
     document.getElementById('toggle-audio-button').addEventListener('click', () => {
-        if (!isAudioEngineStarted) {
-            initializeAudioSynthesizers();
-        }
-        isPeelingAudioMuted = !isPeelingAudioMuted;
-        const toggleButton = document.getElementById('toggle-audio-button');
-        const soundIcon = document.getElementById('audio-status-icon');
-
-        if (!isPeelingAudioMuted) {
-            toggleButton.innerText = "Sound OFF";
-            toggleButton.classList.replace('bg-sky-900/60', 'bg-rose-900/60');
-            soundIcon.className = "fa-solid fa-volume-high text-sky-400";
-            if (Tone.context.state !== 'running') {
-                Tone.start();
-            }
-        } else {
-            toggleButton.innerText = "Sound ON";
-            toggleButton.classList.replace('bg-rose-900/60', 'bg-sky-900/60');
-            soundIcon.className = "fa-solid fa-volume-xmark text-slate-400";
-        }
+        applyPeelingAudioMuteState(!isPeelingAudioMuted);
     });
+    document.getElementById('toggle-release-pop').addEventListener('change', (event) => {
+        isReleasePopSoundEnabled = event.target.checked;
+    });
+    applyPeelingAudioMuteState(isPeelingAudioMuted);
+    // ブラウザは操作前の発音を禁止しているため、既定でオンの場合は最初の操作で音声エンジンを起動する
+    const startAudioOnFirstGesture = () => {
+        window.removeEventListener('pointerdown', startAudioOnFirstGesture, true);
+        window.removeEventListener('keydown', startAudioOnFirstGesture, true);
+        if (!isPeelingAudioMuted) applyPeelingAudioMuteState(false);
+    };
+    window.addEventListener('pointerdown', startAudioOnFirstGesture, true);
+    window.addEventListener('keydown', startAudioOnFirstGesture, true);
 
     document.getElementById('slider-volume').addEventListener('input', (event) => {
         if (Tone.Destination) {
@@ -197,6 +191,29 @@ function bindColorPickerToParameter(pickerId, labelId, parameterKey, shouldRegen
     colorPickerElement.addEventListener('change', () => {
         pushUndoSnapshot();
     });
+}
+
+/**
+ * 効果音のオン/オフを切り替え、ボタン表示を更新する関数 (オン時は必要に応じて音声エンジンを起動)
+ * @param {boolean} shouldMute
+ */
+function applyPeelingAudioMuteState(shouldMute) {
+    isPeelingAudioMuted = shouldMute;
+    const toggleButton = document.getElementById('toggle-audio-button');
+    const soundIcon = document.getElementById('audio-status-icon');
+    if (!shouldMute) {
+        toggleButton.innerText = "Sound OFF";
+        toggleButton.classList.replace('bg-sky-900/60', 'bg-rose-900/60');
+        soundIcon.className = "fa-solid fa-volume-high text-sky-400";
+        // AudioContext はユーザー操作中でないと開始できないため、操作のイベント内でのみ起動される
+        if (navigator.userActivation && !navigator.userActivation.isActive) return;
+        if (!isAudioEngineStarted) initializeAudioSynthesizers();
+        if (Tone.context.state !== 'running') Tone.start();
+    } else {
+        toggleButton.innerText = "Sound ON";
+        toggleButton.classList.replace('bg-rose-900/60', 'bg-sky-900/60');
+        soundIcon.className = "fa-solid fa-volume-xmark text-slate-400";
+    }
 }
 
 /**
