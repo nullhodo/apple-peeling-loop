@@ -106,6 +106,8 @@ function computePeelSceneState(timeMilliseconds) {
  * @param {number} viewportHeight 構図の基準とする描画先の高さ
  */
 function renderAppleScene(g, state, timeMilliseconds, viewportWidth, viewportHeight) {
+    // テクスチャ座標は (u = 周回 τ, v = 緯度) の正規化値で与える (横方向は1周ごとに繰り返す)
+    g.textureMode(NORMAL);
     g.textureWrap(REPEAT, REPEAT);
 
     // ライティング環境 (柔らかなスタジオライティング)
@@ -213,13 +215,28 @@ function readSpiralSample(mesh, row, sample) {
 }
 
 /**
+ * テクスチャと材質 (艶) を設定する関数
+ * 果皮はロウ質の鋭い艶、果肉は水分による柔らかい艶を持たせる
+ */
+function applyAppleSurfaceMaterial(g, surfaceTexture) {
+    g.texture(surfaceTexture);
+    if (surfaceTexture === appleSkinProceduralTexture) {
+        g.specularMaterial(110, 105, 100);
+        g.shininess(38);
+    } else {
+        g.specularMaterial(70, 70, 62);
+        g.shininess(14);
+    }
+}
+
+/**
  * 螺旋帯メッシュの一部 (τ 範囲) を指定半径で描画する関数
  */
 function renderSpiralBandSurface(g, mesh, tauFrom, tauTo, radius, surfaceTexture) {
     const samples = collectSpiralSamples(mesh, tauFrom, tauTo);
     if (samples.length < 2) return;
 
-    g.texture(surfaceTexture);
+    applyAppleSurfaceMaterial(g, surfaceTexture);
     for (let rowIndex = 0; rowIndex < mesh.rows.length - 1; rowIndex++) {
         const lowerRow = mesh.rows[rowIndex];
         const upperRow = mesh.rows[rowIndex + 1];
@@ -243,7 +260,7 @@ function renderSpiralBandSurface(g, mesh, tauFrom, tauTo, radius, surfaceTexture
 function renderPeelStepWalls(g, mesh, knifeTau, outerRadius, thickness, wallTexture) {
     if (knifeTau <= mesh.tauStart + 1e-4 || knifeTau >= mesh.tauEnd - 1e-4) return;
     const innerRadius = outerRadius - thickness;
-    g.texture(wallTexture);
+    applyAppleSurfaceMaterial(g, wallTexture);
 
     // 1. ナイフ位置の切り口 (帯を横切る断面)
     const aheadTau = Math.min(mesh.tauEnd, knifeTau + 0.01);
@@ -415,7 +432,7 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     const layerOffset = 0.6;
     if (releaseFade < 1) g.tint(255, 255 * releaseFade);
     for (const layer of [{ tex: outerTexture, sign: 1 }, { tex: innerTexture, sign: -1 }]) {
-        g.texture(layer.tex);
+        applyAppleSurfaceMaterial(g, layer.tex);
         for (let rowIndex = 0; rowIndex < rowCount - 1; rowIndex++) {
             g.beginShape(TRIANGLE_STRIP);
             for (let sampleIndex = 0; sampleIndex < grid.length; sampleIndex++) {
