@@ -310,8 +310,6 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     const widthFactor = 0.35 + clamp01((sketchParameters.peelRibbonWidth - 0.10) / 0.45) * 0.65;
     const bandWidthPixels = state.latitudeStep * Math.PI * appleBaseRadius * 1.05;
     const coilWidth = bandWidthPixels * widthFactor;
-    const baseFlareAngle = 0.2 + 0.22 * curlIntensity;
-    const restPitch = coilWidth * Math.cos(baseFlareAngle) * 1.02 + 3; // 巻き同士がほぼ接する自然長
     const coilGap = 4 + 3 * curlIntensity;
     const cupDepth = 3 * curlIntensity;
     // カールが強いほど垂れ下がる螺旋の半径が小さく巻きがきつくなる
@@ -334,11 +332,38 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     // 垂れ下がりの高さ: 各点はそれより先 (下) にぶら下がる皮の重さで引き伸ばされるため、
     // ナイフに近い上側ほどピッチが広く、自由端ほど巻きが詰まる。皮ごとのばらつきも加えて積分する
     const totalTurns = Math.max(anchorTau - mesh.tauStart, 1e-3);
+
+    // 帯は元の緯度線の測地曲率 κg (面内の曲がり) を保ったまま、自然な反り (法曲率 1/ρ0) で丸まる。
+    // 円錐台に巻き付くと 1/ρ² = 1/ρ0² + κg²、開き角 tanφ = κg·ρ0 となるため、
+    // 赤道付近は円筒状、ヘタ側とお尻側は互いに逆向きに開いた平らな渦巻きになる
+    const coilShapes = samples.map((sample) => {
+        const turnsBehind = anchorTau - sample.tau;
+        const turnsFromFreeEnd = sample.tau - mesh.tauStart;
+        const centerLatitude = (bandLatitude(sample.tau, 0, state.latitudeStep) + bandLatitude(sample.tau, 1, state.latitudeStep)) * 0.5;
+        const geodesicCurvature = getAppleGeodesicCurvature(centerLatitude) / appleBaseRadius;
+        // 自然な半径は皮ごとにばらつき、自由端へ向かって緩んで広がる
+        const looseness = 1 + 0.35 * smoothStep(0.0, 1.0, turnsBehind / Math.max(totalTurns, 2));
+        const naturalRadius = coilRadius * (0.3 + 0.7 * smoothStep(0.0, 1.2, turnsBehind))
+            * (1 + 0.22 * peelMaterialNoise(sample.tau, 1)) * looseness;
+        // 剥き始め (りんごの頂部) の先端は細い
+        const stripWidth = coilWidth * (0.45 + 0.55 * smoothStep(0.0, 0.8, turnsFromFreeEnd));
+        // 正の κg はヘタ側の辺 (v=1) が短いことを表し、その辺を螺旋の内側 (小さい半径) へ向ける
+        const flareAngle = -Math.atan(geodesicCurvature * naturalRadius) + 0.12 * peelMaterialNoise(sample.tau, 3);
+        const radius = Math.max(
+            1 / Math.hypot(1 / naturalRadius, geodesicCurvature),
+            stripWidth * 0.5 * Math.abs(Math.sin(flareAngle)) + 2
+        );
+        return { radius, flareAngle, stripWidth };
+    });
+
     const hangHeights = new Float32Array(samples.length);
     for (let sampleIndex = samples.length - 2; sampleIndex >= 0; sampleIndex--) {
         const tau = samples[sampleIndex].tau;
         const turnsBehind = anchorTau - tau;
         const tension = (totalTurns - turnsBehind) / Math.max(totalTurns, 1);
+        const shape = coilShapes[sampleIndex];
+        // 巻き同士がほぼ接する自然長 (平らに開いた部分は巻きが重ならず横に並ぶため短い)
+        const restPitch = shape.stripWidth * Math.abs(Math.cos(shape.flareAngle)) * 1.02 + 3;
         const pitch = restPitch * (1 + 0.12 * peelMaterialNoise(tau, 2)) * (1 + 0.55 * tension);
         hangHeights[sampleIndex] = hangHeights[sampleIndex + 1] + pitch * (samples[sampleIndex + 1].tau - tau);
     }
@@ -350,7 +375,7 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
         const sample = samples[sampleIndex];
         const turnsBehind = anchorTau - sample.tau;
-        const turnsFromFreeEnd = sample.tau - mesh.tauStart;
+        const { radius: growingCoilRadius, flareAngle, stripWidth } = coilShapes[sampleIndex];
         const detach = smoothStep(0.0, detachTurns, turnsBehind);
         // ナイフ位置から刃の後方へ巻きながら垂れ下がる螺旋 (軸はナイフ側に寄り、りんごの外側に沿う)
         const coilAngle = turnsBehind * TWO_PI;
@@ -358,13 +383,6 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
         const initialDrop = appleBaseRadius * 0.55 * (1 - Math.exp(-turnsBehind / 0.35));
         const hangDepth = hangHeights[sampleIndex] + initialDrop;
         const coilCenterHeight = anchorHeight + hangDepth;
-        // 半径は皮ごとにばらつき、自由端へ向かって緩んで広がる (円柱ではなく不揃いな円錐状になる)
-        const looseness = 1 + 0.35 * smoothStep(0.0, 1.0, turnsBehind / Math.max(totalTurns, 2));
-        const growingCoilRadius = coilRadius * (0.3 + 0.7 * smoothStep(0.0, 1.2, turnsBehind))
-            * (1 + 0.22 * peelMaterialNoise(sample.tau, 1)) * looseness;
-        const flareAngle = baseFlareAngle + 0.3 * peelMaterialNoise(sample.tau, 3);
-        // 剥き始め (りんごの頂部) の先端は細い
-        const stripWidth = coilWidth * (0.45 + 0.55 * smoothStep(0.0, 0.8, turnsFromFreeEnd));
         const radialUnit = vec3Add(vec3Scale(outward, Math.cos(coilAngle)), vec3Scale(forward, Math.sin(coilAngle)));
         // 巻きの断面をわずかに楕円にし、向きも皮ごとに変える
         const ovality = 1 + 0.14 * Math.sin(2 * coilAngle + 2.5 * peelMaterialNoise(sample.tau, 4));
@@ -390,7 +408,7 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
             const attached = readSpiralSample(mesh, row, sample);
             const attachedPoint = vec3Scale(attached.position, appleBaseRadius);
 
-            // 帯の上端ほど外側へ開き、断面は外側へ反る
+            // 帯の幅方向は開き角 φ で傾け、断面は外側へ反る
             const across = row.v - 0.5;
             const coilHeight = coilCenterHeight - across * stripWidth * Math.cos(flareAngle);
             const localRadius = growingCoilRadius * ovality + across * stripWidth * Math.sin(flareAngle) + cupDepth * (1 - 4 * across * across);

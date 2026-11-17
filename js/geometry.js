@@ -199,3 +199,20 @@ function getAppleCuttingFrame(latitudeNormalized, longitudeAngle, latitudeStep) 
 
     return { position, normal, across, cut };
 }
+
+/**
+ * 緯度線 (帯の中心線) の測地曲率を単位半径で返す関数
+ * 回転面の緯度線では κg = (dr/ds) / r (r: 軸からの距離, s: 経線方向の弧長)。
+ * 正はヘタ側の辺が短い (帯がヘタ側へ曲がる) ことを表し、最も太い緯度で 0、お尻側では負になる
+ */
+function getAppleGeodesicCurvature(latitudeNormalized) {
+    const delta = 0.002;
+    const lat = Math.min(Math.max(latitudeNormalized, APPLE_POLE_CLAMP + delta), 1 - APPLE_POLE_CLAMP - delta);
+    const above = appleUnitPoint(lat - delta, 0);
+    const below = appleUnitPoint(lat + delta, 0);
+    const center = appleUnitPoint(lat, 0);
+    const dRadius = Math.hypot(below[0], below[2]) - Math.hypot(above[0], above[2]);
+    const dHeight = below[1] - above[1];
+    const radius = Math.max(Math.hypot(center[0], center[2]), 0.04);
+    return dRadius / Math.max(Math.hypot(dRadius, dHeight), 1e-9) / radius;
+}
