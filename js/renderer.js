@@ -310,10 +310,12 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     const widthFactor = 0.35 + clamp01((sketchParameters.peelRibbonWidth - 0.10) / 0.45) * 0.65;
     const bandWidthPixels = state.latitudeStep * Math.PI * appleBaseRadius * 1.05;
     const coilWidth = bandWidthPixels * widthFactor;
+    // 果肉だけの帯は果皮のクチクラ層による反りがなく、切削で生じる反りだけになるため丸まりが弱い
+    const materialCurl = state.isFleshPeel ? 0.6 : 1.0;
     const coilGap = 4 + 3 * curlIntensity;
-    const cupDepth = 3 * curlIntensity;
+    const cupDepth = 3 * curlIntensity * materialCurl;
     // カールが強いほど垂れ下がる螺旋の半径が小さく巻きがきつくなる
-    const coilRadius = appleBaseRadius * 0.5 / (0.6 + 0.35 * curlIntensity);
+    const coilRadius = appleBaseRadius * 0.5 / (0.6 + 0.35 * curlIntensity) / materialCurl;
     const detachTurns = 0.3;
 
     // 垂れ下がりの起点 = ナイフ位置 (剥き終わり後はその位置で固定し、そこから落下させる)
@@ -422,7 +424,7 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
             let point = interpolateCylindrical(attachedPoint, coilPoint, detach);
 
             // 刃先直後の浮き上がり (カール) と、本体へのめり込み防止 (りんご中心から放射方向へ押し出す)
-            const lift = Math.sin(Math.PI * Math.min(1, turnsBehind / detachTurns)) * (3 + 5 * curlIntensity);
+            const lift = Math.sin(Math.PI * Math.min(1, turnsBehind / detachTurns)) * (3 + 5 * curlIntensity * materialCurl);
             const horizontalRadius = Math.hypot(point[0], point[2]);
             if (horizontalRadius > 1e-6) {
                 const liftScale = (horizontalRadius + lift) / horizontalRadius;
