@@ -4,7 +4,7 @@
 // Configuration & Parameters State
 let sketchParameters = {
     loopDurationMilliseconds: 6000,
-    spiralTurnCount: 5.5,
+    spiralTurnCount: 8.0,
     peelRibbonWidth: 0.28,
     peelCurlCurvature: 1.20,
     peelThicknessRatio: 0.032, // 剥く皮のごく薄い厚み比率 (約3.2%)
