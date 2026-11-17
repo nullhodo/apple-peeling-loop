@@ -266,8 +266,8 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     const widthFactor = 0.35 + clamp01((sketchParameters.peelRibbonWidth - 0.10) / 0.45) * 0.65;
     const bandWidthPixels = state.latitudeStep * Math.PI * appleBaseRadius * 1.05;
     const coilWidth = bandWidthPixels * widthFactor;
-    const flareAngle = 0.2 + 0.22 * curlIntensity;
-    const hangPitch = coilWidth * Math.cos(flareAngle) * 1.15 + 4;
+    const baseFlareAngle = 0.2 + 0.22 * curlIntensity;
+    const restPitch = coilWidth * Math.cos(baseFlareAngle) * 1.02 + 3; // 巻き同士がほぼ接する自然長
     const coilGap = 4 + 3 * curlIntensity;
     const cupDepth = 3 * curlIntensity;
     // カールが強いほど垂れ下がる螺旋の半径が小さく巻きがきつくなる
@@ -287,25 +287,58 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
     const samples = collectSpiralSamples(mesh, mesh.tauStart, anchorTau);
     if (samples.length < 2) return;
 
+    // 垂れ下がりの高さ: 各点はそれより先 (下) にぶら下がる皮の重さで引き伸ばされるため、
+    // ナイフに近い上側ほどピッチが広く、自由端ほど巻きが詰まる。皮ごとのばらつきも加えて積分する
+    const totalTurns = Math.max(anchorTau - mesh.tauStart, 1e-3);
+    const hangHeights = new Float32Array(samples.length);
+    for (let sampleIndex = samples.length - 2; sampleIndex >= 0; sampleIndex--) {
+        const tau = samples[sampleIndex].tau;
+        const turnsBehind = anchorTau - tau;
+        const tension = (totalTurns - turnsBehind) / Math.max(totalTurns, 1);
+        const pitch = restPitch * (1 + 0.12 * peelMaterialNoise(tau, 2)) * (1 + 0.55 * tension);
+        hangHeights[sampleIndex] = hangHeights[sampleIndex + 1] + pitch * (samples[sampleIndex + 1].tau - tau);
+    }
+    // 下ほど刃の進行の後ろへ遅れて傾き、ループ周期に同期してゆっくり揺れる
+    const swingPhase = state.loopPhase * TWO_PI * 2;
+
     const rowCount = mesh.rows.length;
     const grid = []; // grid[sample][row] = {position, latitude}
-    for (const sample of samples) {
+    for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
+        const sample = samples[sampleIndex];
         const turnsBehind = anchorTau - sample.tau;
+        const turnsFromFreeEnd = sample.tau - mesh.tauStart;
         const detach = smoothStep(0.0, detachTurns, turnsBehind);
         // ナイフ位置から刃の後方へ巻きながら垂れ下がる螺旋 (軸はナイフ側に寄り、りんごの外側に沿う)
         const coilAngle = turnsBehind * TWO_PI;
         // 刃の直後は重力でまっすぐ垂れ、離れるほど螺旋の半径が育つ
         const initialDrop = appleBaseRadius * 0.55 * (1 - Math.exp(-turnsBehind / 0.35));
-        const coilCenterHeight = anchorHeight + hangPitch * turnsBehind + initialDrop;
-        const growingCoilRadius = coilRadius * (0.3 + 0.7 * smoothStep(0.0, 1.2, turnsBehind));
+        const hangDepth = hangHeights[sampleIndex] + initialDrop;
+        const coilCenterHeight = anchorHeight + hangDepth;
+        // 半径は皮ごとにばらつき、自由端へ向かって緩んで広がる (円柱ではなく不揃いな円錐状になる)
+        const looseness = 1 + 0.35 * smoothStep(0.0, 1.0, turnsBehind / Math.max(totalTurns, 2));
+        const growingCoilRadius = coilRadius * (0.3 + 0.7 * smoothStep(0.0, 1.2, turnsBehind))
+            * (1 + 0.22 * peelMaterialNoise(sample.tau, 1)) * looseness;
+        const flareAngle = baseFlareAngle + 0.3 * peelMaterialNoise(sample.tau, 3);
+        // 剥き始め (りんごの頂部) の先端は細い
+        const stripWidth = coilWidth * (0.45 + 0.55 * smoothStep(0.0, 0.8, turnsFromFreeEnd));
         const radialUnit = vec3Add(vec3Scale(outward, Math.cos(coilAngle)), vec3Scale(forward, Math.sin(coilAngle)));
+        // 巻きの断面をわずかに楕円にし、向きも皮ごとに変える
+        const ovality = 1 + 0.14 * Math.sin(2 * coilAngle + 2.5 * peelMaterialNoise(sample.tau, 4));
         // 螺旋軸の位置は帯の幅全体で共通 (帯がかかる高さ範囲でのりんごの最大半径の外側)
-        const halfSpan = coilWidth * 0.5;
+        const halfSpan = stripWidth * 0.5;
         let appleRadiusAround = 0;
         for (const offset of [-halfSpan, 0, halfSpan]) {
             appleRadiusAround = Math.max(appleRadiusAround, getAppleUnitRadiusAtHeight((coilCenterHeight + offset) / appleBaseRadius));
         }
         const axisDistance = appleRadiusAround * appleBaseRadius + growingCoilRadius + coilGap;
+        // 軸の曲がり: 深いほど後方へ遅れ、揺れも大きい
+        const depthRatio = clamp01(hangDepth / (appleBaseRadius * 2.6));
+        const trail = -appleBaseRadius * 0.24 * Math.pow(depthRatio, 1.3);
+        const swing = appleBaseRadius * 0.13 * depthRatio * depthRatio;
+        const axisOffset = vec3Add(
+            vec3Scale(forward, trail + swing * Math.sin(swingPhase - depthRatio * 2.2)),
+            vec3Scale(outward, appleBaseRadius * 0.06 * depthRatio + swing * 0.5 * Math.cos(swingPhase - depthRatio * 2.2))
+        );
 
         const column = [];
         for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
@@ -315,12 +348,12 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
 
             // 帯の上端ほど外側へ開き、断面は外側へ反る
             const across = row.v - 0.5;
-            const coilHeight = coilCenterHeight - across * coilWidth * Math.cos(flareAngle);
-            const localRadius = growingCoilRadius + across * coilWidth * Math.sin(flareAngle) + cupDepth * (1 - 4 * across * across);
+            const coilHeight = coilCenterHeight - across * stripWidth * Math.cos(flareAngle);
+            const localRadius = growingCoilRadius * ovality + across * stripWidth * Math.sin(flareAngle) + cupDepth * (1 - 4 * across * across);
             const coilPoint = [
-                outward[0] * axisDistance - radialUnit[0] * localRadius,
+                outward[0] * axisDistance - radialUnit[0] * localRadius + axisOffset[0],
                 coilHeight,
-                outward[2] * axisDistance - radialUnit[2] * localRadius
+                outward[2] * axisDistance - radialUnit[2] * localRadius + axisOffset[2]
             ];
 
             // 円柱座標 (りんご中心軸まわりの角度・半径・高さ) で補間し、本体内部を横切らないようにする
@@ -375,6 +408,16 @@ function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture,
         }
     }
     if (releaseFade < 1) g.tint(255, 255); // WEBGL では noTint() が null を設定し描画が落ちるため明示的に戻す
+}
+
+/**
+ * 皮の材料座標 τ に固定された滑らかなばらつき (-1〜1 程度)。
+ * τ に固定するため、皮が垂れ下がって移動しても形の癖は皮と一緒に動く
+ */
+function peelMaterialNoise(tau, seed) {
+    return 0.5 * Math.sin(tau * 0.93 * TWO_PI * 0.5 + seed * 1.7)
+        + 0.3 * Math.sin(tau * 1.71 * TWO_PI * 0.5 + seed * 4.1)
+        + 0.2 * Math.sin(tau * 3.13 * TWO_PI * 0.5 + seed * 2.3);
 }
 
 /**
