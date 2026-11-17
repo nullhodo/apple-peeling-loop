@@ -1,8 +1,38 @@
 /* ==========================================================================
    COLOR PALETTES COLLECTION & THEME GENERATION ENGINE
    ========================================================================== */
-// Color Palettes Collection (添付パレット + グレースケール追加)
+// Color Palettes Collection (りんごの定番配色 + 添付パレット + グレースケール)
 const applicationColorPalettes = [
+    {
+        title: "普通のリンゴ",
+        comment: "赤い果皮とクリーム色の果肉",
+        colors: [
+            { name: "Night", hex: "#0D1117", rgb: [13, 17, 23] },
+            { name: "Apple Red", hex: "#C81D25", rgb: [200, 29, 37] },
+            { name: "Cream Flesh", hex: "#F6EBC6", rgb: [246, 235, 198] },
+            { name: "Stem Brown", hex: "#57361E", rgb: [87, 54, 30] }
+        ]
+    },
+    {
+        title: "青りんご",
+        comment: "黄緑の果皮と淡い緑白の果肉",
+        colors: [
+            { name: "Deep Forest", hex: "#0F1712", rgb: [15, 23, 18] },
+            { name: "Apple Green", hex: "#8CBF3F", rgb: [140, 191, 63] },
+            { name: "Pale Flesh", hex: "#F1F3D3", rgb: [241, 243, 211] },
+            { name: "Stem Brown", hex: "#6B4A2B", rgb: [107, 74, 43] }
+        ]
+    },
+    {
+        title: "白黒リンゴ",
+        comment: "#FFF と #000 だけの無彩色",
+        colors: [
+            { name: "White", hex: "#FFFFFF", rgb: [255, 255, 255] },
+            { name: "Black", hex: "#000000", rgb: [0, 0, 0] },
+            { name: "White", hex: "#FFFFFF", rgb: [255, 255, 255] },
+            { name: "Black", hex: "#000000", rgb: [0, 0, 0] }
+        ]
+    },
     {
         title: "Retro Sunny Living",
         comment: "レトロで温かみのある暖色",
