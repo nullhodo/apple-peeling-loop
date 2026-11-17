@@ -49,3 +49,24 @@ function interpolateHexColors(startHex, endHex, interpolationFactor) {
     const finalB = Math.round(startRgb.b + (endRgb.b - startRgb.b) * interpolationFactor);
     return `#${((1 << 24) + (finalR << 16) + (finalG << 8) + finalB).toString(16).slice(1)}`;
 }
+
+/**
+ * 配色が無彩色 (背景・果皮・果肉がすべてグレー) かを判定する関数
+ * 無彩色の配色では、テクスチャの差し色・照明・ナイフも無彩色に揃える
+ */
+function isMonochromeColorScheme() {
+    return [sketchParameters.backgroundColorHex, sketchParameters.appleSkinColorHex, sketchParameters.appleFleshColorHex].every((hex) => {
+        const rgb = convertHexToRgb(hex);
+        return Math.max(rgb.r, rgb.g, rgb.b) - Math.min(rgb.r, rgb.g, rgb.b) <= 8;
+    });
+}
+
+/**
+ * 固定の差し色を配色に合わせて返す関数 (無彩色の配色では同じ明るさのグレーに置き換える)
+ * @returns {number[]} [r, g, b]
+ */
+function toneForColorScheme(red, green, blue) {
+    if (!isMonochromeColorScheme()) return [red, green, blue];
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    return [luminance, luminance, luminance];
+}

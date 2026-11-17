@@ -116,6 +116,12 @@ function buildAppleTexturePatterns() {
     return appleTexturePatternCache;
 }
 
+/** 差し色を配色に合わせて {r, g, b} で返す (無彩色の配色ではグレー) */
+function toneRgb(red, green, blue) {
+    const [r, g, b] = toneForColorScheme(red, green, blue);
+    return { r, g, b };
+}
+
 function mixRgb(a, b, t) {
     return { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t };
 }
@@ -133,9 +139,9 @@ function generateProceduralTextures() {
     const skinRgb = convertHexToRgb(sketchParameters.appleSkinColorHex);
     const fleshRgb = convertHexToRgb(sketchParameters.appleFleshColorHex);
     // 地色はパレットと調和するよう果肉色寄りに、わずかに緑へ寄せる
-    const groundRgb = mixRgb(mixRgb(fleshRgb, skinRgb, 0.22), { r: 168, g: 196, b: 82 }, 0.22);
+    const groundRgb = mixRgb(mixRgb(fleshRgb, skinRgb, 0.22), toneRgb(168, 196, 82), 0.22);
     const deepRgb = { r: skinRgb.r * 0.62, g: skinRgb.g * 0.55, b: skinRgb.b * 0.65 };
-    const lenticelRgb = mixRgb(fleshRgb, { r: 255, g: 250, b: 225 }, 0.4);
+    const lenticelRgb = mixRgb(fleshRgb, toneRgb(255, 250, 225), 0.4);
 
     // 1. りんごの果皮テクスチャ (Apple Skin)
     if (appleSkinProceduralTexture) appleSkinProceduralTexture.remove();
@@ -166,8 +172,8 @@ function generateProceduralTextures() {
     appleFleshProceduralTexture.pixelDensity(1);
     appleFleshProceduralTexture.loadPixels();
     const fleshPixels = appleFleshProceduralTexture.pixels;
-    const veinRgb = mixRgb(fleshRgb, { r: 200, g: 205, b: 150 }, 0.35);
-    const tintRgb = mixRgb(fleshRgb, { r: 215, g: 225, b: 170 }, 0.45);
+    const veinRgb = mixRgb(fleshRgb, toneRgb(200, 205, 150), 0.35);
+    const tintRgb = mixRgb(fleshRgb, toneRgb(215, 225, 170), 0.45);
     for (let index = 0; index < width * height; index++) {
         let color = mixRgb(fleshRgb, tintRgb, patterns.fleshTint[index] * 0.6);
         color = mixRgb(color, veinRgb, patterns.fleshVein[index] * 0.5);

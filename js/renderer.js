@@ -111,10 +111,10 @@ function renderAppleScene(g, state, timeMilliseconds, viewportWidth, viewportHei
     g.textureWrap(REPEAT, REPEAT);
 
     // ライティング環境 (柔らかなスタジオライティング)
-    g.ambientLight(105, 105, 112);
-    g.directionalLight(255, 248, 236, 0.55, 0.65, -0.55);
-    g.directionalLight(70, 85, 120, -0.7, -0.4, 0.4);
-    g.pointLight(120, 110, 100, 0, -300, 400);
+    g.ambientLight(...toneForColorScheme(105, 105, 112));
+    g.directionalLight(...toneForColorScheme(255, 248, 236), 0.55, 0.65, -0.55);
+    g.directionalLight(...toneForColorScheme(70, 85, 120), -0.7, -0.4, 0.4);
+    g.pointLight(...toneForColorScheme(120, 110, 100), 0, -300, 400);
 
     g.push();
     // 描画先のサイズに合わせて構図を一定に保つ
@@ -224,10 +224,10 @@ function readSpiralSample(mesh, row, sample) {
 function applyAppleSurfaceMaterial(g, surfaceTexture) {
     g.texture(surfaceTexture);
     if (surfaceTexture === appleSkinProceduralTexture) {
-        g.specularMaterial(110, 105, 100);
+        g.specularMaterial(...toneForColorScheme(110, 105, 100));
         g.shininess(38);
     } else {
-        g.specularMaterial(70, 70, 62);
+        g.specularMaterial(...toneForColorScheme(70, 70, 62));
         g.shininess(14);
     }
 }
@@ -539,9 +539,9 @@ function renderPeelingKnife(g, state, appleBaseRadius, peelThickness) {
     g.push();
 
     // 1. 鋼の刃 (切れ刃から峰へ向かって厚みが増す)
-    g.specularMaterial(235, 240, 250);
+    g.specularMaterial(...toneForColorScheme(235, 240, 250));
     g.shininess(90);
-    g.fill(214, 222, 234);
+    g.fill(...toneForColorScheme(214, 222, 234));
     const edgeLine = [[-40, 0.4], [-28, 0.1], [-16, 0], [-4, 0], [8, 0]];
     const spineLine = [[-40, 0.4], [-35, 4.6], [-25, 7.6], [-8, 8.4], [8, 8.6]];
     const spineHalfThick = 0.55;
@@ -571,21 +571,21 @@ function renderPeelingKnife(g, state, appleBaseRadius, peelThickness) {
     renderedVertexCount += edgeLine.length * 4 + spineLine.length * 2;
 
     // 2. 金属口金 (Bolster)
-    g.specularMaterial(205, 210, 220);
-    g.fill(190, 196, 206);
+    g.specularMaterial(...toneForColorScheme(205, 210, 220));
+    g.fill(...toneForColorScheme(190, 196, 206));
     renderOrientedBox(g, toWorld(10, 4.6, 0.6), axisLength, axisWidth, axisNormal, 4 * unit, 10 * unit, 3.6 * unit);
 
     // 3. 木製ハンドル (Handle)
-    g.ambientMaterial(95, 52, 28);
-    g.specularMaterial(70, 40, 22);
+    g.ambientMaterial(...toneForColorScheme(95, 52, 28));
+    g.specularMaterial(...toneForColorScheme(70, 40, 22));
     g.shininess(20);
-    g.fill(92, 48, 26);
+    g.fill(...toneForColorScheme(92, 48, 26));
     renderOrientedBox(g, toWorld(33, 4.6, 1.0), axisLength, axisWidth, axisNormal, 42 * unit, 9.2 * unit, 4.8 * unit);
 
     // 4. ハンドルの真鍮リベット (Brass Rivets)
-    g.specularMaterial(240, 200, 80);
+    g.specularMaterial(...toneForColorScheme(240, 200, 80));
     g.shininess(60);
-    g.fill(212, 160, 40);
+    g.fill(...toneForColorScheme(212, 160, 40));
     for (const rivetA of [22, 44]) {
         renderOrientedBox(g, toWorld(rivetA, 4.6, 1.0), axisLength, axisWidth, axisNormal, 2.4 * unit, 2.4 * unit, 5.2 * unit);
     }
