@@ -1,337 +1,558 @@
 /* ==========================================================================
    RECURSIVE APPLE & PEEL RENDERING PIPELINE
    ========================================================================== */
+const APPLE_BASE_RADIUS = 140;
+// 半周期のうち剥離に使う割合 (残りは剥けた皮が落下し、ナイフが頂部へ戻るリリース区間)
+const PEEL_PORTION_OF_HALF_PHASE = 0.84;
+
+function clamp01(value) { return Math.min(1, Math.max(0, value)); }
+function smoothStep(edge0, edge1, value) {
+    const t = clamp01((value - edge0) / (edge1 - edge0));
+    return t * t * (3 - 2 * t);
+}
+/** 3次エルミート補間 (両端の位置と速度を指定) */
+function hermiteInterpolate(start, end, startVelocity, endVelocity, t) {
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * start + (t3 - 2 * t2 + t) * startVelocity
+        + (-2 * t3 + 3 * t2) * end + (t3 - t2) * endVelocity;
+}
+
+/**
+ * 時刻から描画状態 (剥離進行度・ナイフ位置・スケール等) を算出する関数
+ * @param {number} timeMilliseconds
+ */
+function computePeelSceneState(timeMilliseconds) {
+    const loopDuration = sketchParameters.loopDurationMilliseconds;
+    const loopPhase = (timeMilliseconds % loopDuration) / loopDuration;
+    const isFleshPeel = loopPhase >= 0.5;
+    const localPhase = isFleshPeel ? (loopPhase - 0.5) * 2.0 : loopPhase * 2.0;
+
+    const turnCount = sketchParameters.spiralTurnCount;
+    const latitudeStep = 1 / Math.max(1, turnCount - 1);
+    const peelProgress = clamp01(localPhase / PEEL_PORTION_OF_HALF_PHASE);
+    const releaseProgress = clamp01((localPhase - PEEL_PORTION_OF_HALF_PHASE) / (1 - PEEL_PORTION_OF_HALF_PHASE));
+    const knifeTau = convertPeelProgressToTau(getSpiralBandMesh(turnCount), peelProgress);
+
+    // ナイフ位置: 剥離中は現在の帯の中央、リリース中は外側へ浮きながら頂部へ戻る
+    const bandMidLatitude = (tau) => (bandLatitude(tau, 0, latitudeStep) + bandLatitude(tau, 1, latitudeStep)) * 0.5;
+    let knifeLatitude;
+    let knifeLongitude;
+    let knifeLift = 0;
+    if (releaseProgress <= 0) {
+        knifeLatitude = bandMidLatitude(knifeTau);
+        knifeLongitude = knifeTau * TWO_PI;
+    } else {
+        // 経度は剥離時の角速度を保ったまま次周期の開始角 (2π の整数倍) へ滑らかに接続する
+        const mesh = getSpiralBandMesh(turnCount);
+        const lastStep = mesh.tauValues[mesh.sampleCount - 1] - mesh.tauValues[mesh.sampleCount - 2];
+        const lastArcStep = mesh.cumulativeArc[mesh.sampleCount - 1] - mesh.cumulativeArc[mesh.sampleCount - 2];
+        const tauPerProgress = lastStep / lastArcStep * mesh.cumulativeArc[mesh.sampleCount - 1];
+        const angularVelocity = TWO_PI * tauPerProgress * (1 - PEEL_PORTION_OF_HALF_PHASE) / PEEL_PORTION_OF_HALF_PHASE;
+        const endLongitude = (turnCount - 1) * TWO_PI;
+        let extraTurns = Math.ceil(turnCount - 1 - 1e-6) - (turnCount - 1);
+        while (extraTurns * TWO_PI < angularVelocity * 0.75) extraTurns += 1;
+        knifeLongitude = hermiteInterpolate(endLongitude, endLongitude + extraTurns * TWO_PI, angularVelocity, angularVelocity, releaseProgress);
+        knifeLatitude = hermiteInterpolate(1, 0, 0, 0, releaseProgress);
+        knifeLift = Math.sin(Math.PI * releaseProgress) * APPLE_BASE_RADIUS * 0.45;
+    }
+
+    return {
+        loopPhase,
+        isFleshPeel,
+        localPhase,
+        peelProgress,
+        releaseProgress,
+        turnCount,
+        latitudeStep,
+        knifeTau,
+        knifeLatitude,
+        knifeLongitude,
+        knifeLift,
+        // 剥いた厚みと釣り合う微小スケール拡大 (剥離完了時に元の半径へ戻りシームレスに循環)
+        balancedScale: 1.0 / (1.0 - sketchParameters.peelThicknessRatio * peelProgress)
+    };
+}
+
+/**
+ * ライティング・視点制御を含むシーン全体を描画する関数
+ * @param {p5|p5.Graphics} g 描画先 (メインキャンバスまたはオフスクリーンWEBGLバッファ)
+ * @param {object} state computePeelSceneState の戻り値
+ * @param {number} timeMilliseconds 自動回転用の時刻
+ * @param {number} viewportHeight 構図の基準とする描画先の高さ
+ */
+function renderAppleScene(g, state, timeMilliseconds, viewportWidth, viewportHeight) {
+    g.textureWrap(REPEAT, REPEAT);
+
+    // ライティング環境 (柔らかなスタジオライティング)
+    g.ambientLight(105, 105, 112);
+    g.directionalLight(255, 248, 236, 0.55, 0.65, -0.55);
+    g.directionalLight(70, 85, 120, -0.7, -0.4, 0.4);
+    g.pointLight(120, 110, 100, 0, -300, 400);
+
+    g.push();
+    // 描画先のサイズに合わせて構図を一定に保つ
+    const fitScale = Math.min(viewportWidth, viewportHeight) / 760;
+    g.scale(fitScale);
+
+    if (sketchParameters.knifeMotionMode === "fixed") {
+        // --- ナイフ固定モード (リンゴ側が自転・昇降してナイフに送られる) ---
+        const contactHeight = appleUnitPoint(state.knifeLatitude, 0)[1] * APPLE_BASE_RADIUS * state.balancedScale;
+        g.rotateX(-0.32);
+        g.rotateY(-Math.PI * 0.30);
+        g.translate(0, -contactHeight - APPLE_BASE_RADIUS * 0.15, 0);
+        g.rotateY(-state.knifeLongitude);
+    } else {
+        // --- ナイフ移動モード (リンゴは自転し、ナイフが周囲を巡る) ---
+        const sceneRotationAngle = timeMilliseconds * 0.0006 * sketchParameters.autoRotationSpeed;
+        g.translate(0, -APPLE_BASE_RADIUS * 0.3, 0);
+        g.rotateX(-0.30); // 緩やかな見下ろし角 (先に傾けてから自転させ、軸がぶれないようにする)
+        g.rotateY(sceneRotationAngle);
+    }
+
+    g.push();
+    g.scale(state.balancedScale);
+    renderRecursiveAppleEntity(g, state);
+    g.pop();
+
+    g.pop();
+}
+
 /**
  * 再帰りんご本体、螺旋リボン、ナイフを描画する関数
- * @param {number} localProgress 局所剥離進行度 (0.0 - 1.0)
- * @param {boolean} isFleshPeel 果肉剥離フェーズか否か
  */
-function renderRecursiveAppleEntity(localProgress, isFleshPeel) {
-    const appleBaseRadius = 140;
-    const latitudeGridSegments = 64;
-    const longitudeGridSegments = 64;
-    const spiralTurns = sketchParameters.spiralTurnCount;
+function renderRecursiveAppleEntity(g, state) {
+    const appleBaseRadius = APPLE_BASE_RADIUS;
     const peelThickness = appleBaseRadius * sketchParameters.peelThicknessRatio;
+    const mesh = getSpiralBandMesh(state.turnCount);
 
     // テクスチャの選択 (フェーズごとに表裏が循環反転)
-    const surfaceOuterTexture = isFleshPeel ? appleFleshProceduralTexture : appleSkinProceduralTexture;
-    const subsurfaceTexture = isFleshPeel ? appleSkinProceduralTexture : appleFleshProceduralTexture;
+    const surfaceOuterTexture = state.isFleshPeel ? appleFleshProceduralTexture : appleSkinProceduralTexture;
+    const subsurfaceTexture = state.isFleshPeel ? appleSkinProceduralTexture : appleFleshProceduralTexture;
 
-    // ナイフの現在位置 (緯度・経度)
-    const knifeLatitude = constrain(0.04 + localProgress * 0.90, 0.04, 0.94);
-    const knifeLongitude = (localProgress * TWO_PI * spiralTurns) % TWO_PI;
+    g.noStroke();
 
-    // --- A. りんご本体 (ナイフの通過軌跡に沿って果肉が露出するメッシュ) ---
-    noStroke();
+    // --- A. りんご本体: 未剥離の外皮 (τ ≥ τk) と剥離済みの内層 (τ ≤ τk) ---
+    renderSpiralBandSurface(g, mesh, state.knifeTau, mesh.tauEnd, appleBaseRadius, surfaceOuterTexture);
+    renderSpiralBandSurface(g, mesh, mesh.tauStart, state.knifeTau, appleBaseRadius - peelThickness, subsurfaceTexture);
 
-    for (let latitudeIndex = 0; latitudeIndex < latitudeGridSegments; latitudeIndex++) {
-        const latNorm1 = latitudeIndex / latitudeGridSegments;
-        const latNorm2 = (latitudeIndex + 1) / latitudeGridSegments;
+    // --- B. 切削段差の断面 (ナイフ位置の切り口と、ひとつ上の周回との境界) ---
+    renderPeelStepWalls(g, mesh, state.knifeTau, appleBaseRadius, peelThickness, appleFleshProceduralTexture);
 
-        beginShape(TRIANGLE_STRIP);
-        for (let longIndex = 0; longIndex <= longitudeGridSegments; longIndex++) {
-            const longNorm = longIndex / longitudeGridSegments;
-            const longAngle = longNorm * TWO_PI;
+    // --- C. 剥がれて垂れ下がる皮のリボン ---
+    renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, surfaceOuterTexture, subsurfaceTexture);
 
-            // 各頂点がナイフ通過済み (剥離済み) かどうかの幾何学的判定
-            const isPeeled1 = checkIfSurfacePointIsPeeled(latNorm1, longAngle, localProgress, spiralTurns);
-            const isPeeled2 = checkIfSurfacePointIsPeeled(latNorm2, longAngle, localProgress, spiralTurns);
+    // --- D. 果物ナイフ ---
+    renderPeelingKnife(g, state, appleBaseRadius, peelThickness);
 
-            const radius1 = isPeeled1 ? (appleBaseRadius - peelThickness) : appleBaseRadius;
-            const radius2 = isPeeled2 ? (appleBaseRadius - peelThickness) : appleBaseRadius;
+    // --- E. りんごの軸 / ヘタ (Stem) ---
+    renderAppleStem(g, appleBaseRadius);
+}
 
-            const point1 = calculateAppleSurfacePoint(latNorm1, longAngle, radius1);
-            const point2 = calculateAppleSurfacePoint(latNorm2, longAngle, radius2);
+/**
+ * メッシュ上の τ に対応するサンプル (補間) を返す関数
+ */
+function sampleSpiralBandRow(mesh, row, tau) {
+    const position = (tau - mesh.tauStart) / (mesh.tauEnd - mesh.tauStart) * (mesh.sampleCount - 1);
+    const index = Math.min(mesh.sampleCount - 2, Math.max(0, Math.floor(position)));
+    const t = Math.min(1, Math.max(0, position - index));
+    return {
+        position: vec3Lerp(row.positions[index], row.positions[index + 1], t),
+        normal: vec3Normalize(vec3Lerp(row.normals[index], row.normals[index + 1], t)),
+        latitude: row.latitudes[index] + (row.latitudes[index + 1] - row.latitudes[index]) * t
+    };
+}
 
-            texture(isPeeled1 ? subsurfaceTexture : surfaceOuterTexture);
+/**
+ * τ 範囲内のメッシュサンプル列 (端点は補間して正確に一致させる) を列挙する関数
+ */
+function collectSpiralSamples(mesh, tauFrom, tauTo) {
+    const samples = [];
+    if (tauTo - tauFrom <= 1e-6) return samples;
+    const step = (mesh.tauEnd - mesh.tauStart) / (mesh.sampleCount - 1);
+    samples.push({ tau: tauFrom, index: -1 });
+    const firstIndex = Math.floor((tauFrom - mesh.tauStart) / step) + 1;
+    for (let index = Math.max(0, firstIndex); index < mesh.sampleCount; index++) {
+        const tau = mesh.tauValues[index];
+        if (tau >= tauTo - 1e-6) break;
+        if (tau > tauFrom + 1e-6) samples.push({ tau, index });
+    }
+    samples.push({ tau: tauTo, index: -1 });
+    return samples;
+}
 
-            vertex(point1.x, point1.y, point1.z, longNorm, latNorm1);
-            vertex(point2.x, point2.y, point2.z, longNorm, latNorm2);
-            renderedVertexCount += 2;
+function readSpiralSample(mesh, row, sample) {
+    if (sample.index >= 0) {
+        return { position: row.positions[sample.index], normal: row.normals[sample.index], latitude: row.latitudes[sample.index] };
+    }
+    return sampleSpiralBandRow(mesh, row, sample.tau);
+}
+
+/**
+ * 螺旋帯メッシュの一部 (τ 範囲) を指定半径で描画する関数
+ */
+function renderSpiralBandSurface(g, mesh, tauFrom, tauTo, radius, surfaceTexture) {
+    const samples = collectSpiralSamples(mesh, tauFrom, tauTo);
+    if (samples.length < 2) return;
+
+    g.texture(surfaceTexture);
+    for (let rowIndex = 0; rowIndex < mesh.rows.length - 1; rowIndex++) {
+        const lowerRow = mesh.rows[rowIndex];
+        const upperRow = mesh.rows[rowIndex + 1];
+        g.beginShape(TRIANGLE_STRIP);
+        for (const sample of samples) {
+            const lower = readSpiralSample(mesh, lowerRow, sample);
+            const upper = readSpiralSample(mesh, upperRow, sample);
+            g.normal(lower.normal[0], lower.normal[1], lower.normal[2]);
+            g.vertex(lower.position[0] * radius, lower.position[1] * radius, lower.position[2] * radius, sample.tau, lower.latitude);
+            g.normal(upper.normal[0], upper.normal[1], upper.normal[2]);
+            g.vertex(upper.position[0] * radius, upper.position[1] * radius, upper.position[2] * radius, sample.tau, upper.latitude);
         }
-        endShape();
+        g.endShape();
+        renderedVertexCount += samples.length * 2;
     }
-
-    // --- B. 螺旋状にカールしながら剥がれ落ちる皮のリボン ---
-    renderPeelingRibbonStrip(localProgress, isFleshPeel, appleBaseRadius);
-
-    // --- C. 切削ナイフ (接平面に寄り添い、刃先が切削境界にピタリと吸着) ---
-    renderPeelingKnife(knifeLatitude, knifeLongitude, appleBaseRadius, localProgress);
-
-    // --- D. りんごの軸 / ヘタ (Stem) ---
-    renderAppleStem(appleBaseRadius);
 }
 
 /**
- * 表面の特定位置がナイフによって既に剥がされたかを判定する関数
- * @param {number} latitudeNormalized 緯度正規化値 (0.0 - 1.0)
- * @param {number} longitudeAngle 経度ラジアン (0 - TWO_PI)
- * @param {number} progress 進行度 (0.0 - 1.0)
- * @param {number} spiralTurns 巻き数
- * @returns {boolean}
+ * 外皮と内層の段差 (切り口の断面) を描画する関数
  */
-function checkIfSurfacePointIsPeeled(latitudeNormalized, longitudeAngle, progress, spiralTurns) {
-    // 有効切削緯度範囲: 0.04 〜 0.94
-    const startLatitude = 0.04;
-    const endLatitude = 0.94;
-    if (latitudeNormalized < startLatitude) return true;
-    if (latitudeNormalized > endLatitude) return false;
+function renderPeelStepWalls(g, mesh, knifeTau, outerRadius, thickness, wallTexture) {
+    if (knifeTau <= mesh.tauStart + 1e-4 || knifeTau >= mesh.tauEnd - 1e-4) return;
+    const innerRadius = outerRadius - thickness;
+    g.texture(wallTexture);
 
-    const normalizedLat = (latitudeNormalized - startLatitude) / (endLatitude - startLatitude);
-    const currentLatThreshold = progress;
-    const turnPitch = 1.0 / spiralTurns;
-
-    if (normalizedLat < currentLatThreshold - turnPitch) {
-        return true; // 完全に通過済みの上の周回
+    // 1. ナイフ位置の切り口 (帯を横切る断面)
+    const aheadTau = Math.min(mesh.tauEnd, knifeTau + 0.01);
+    g.beginShape(TRIANGLE_STRIP);
+    for (const row of mesh.rows) {
+        const here = sampleSpiralBandRow(mesh, row, knifeTau);
+        const ahead = sampleSpiralBandRow(mesh, row, aheadTau);
+        const wallNormal = vec3Normalize(vec3Sub(here.position, ahead.position), here.normal);
+        g.normal(wallNormal[0], wallNormal[1], wallNormal[2]);
+        g.vertex(here.position[0] * outerRadius, here.position[1] * outerRadius, here.position[2] * outerRadius, knifeTau, here.latitude);
+        g.vertex(here.position[0] * innerRadius, here.position[1] * innerRadius, here.position[2] * innerRadius, knifeTau, here.latitude + 0.01);
     }
-    if (normalizedLat > currentLatThreshold) {
-        return false; // まだ到達していない下の周回
+    g.endShape();
+
+    // 2. ひとつ上の周回 (剥離済み) との境界に沿った螺旋状の段差
+    const topRow = mesh.rows[mesh.rows.length - 1];
+    const belowTopRow = mesh.rows[mesh.rows.length - 2];
+    const samples = collectSpiralSamples(mesh, knifeTau, Math.min(mesh.tauEnd, knifeTau + 1));
+    g.beginShape(TRIANGLE_STRIP);
+    for (const sample of samples) {
+        const top = readSpiralSample(mesh, topRow, sample);
+        const below = readSpiralSample(mesh, belowTopRow, sample);
+        const wallNormal = vec3Normalize(vec3Sub(top.position, below.position), top.normal);
+        g.normal(wallNormal[0], wallNormal[1], wallNormal[2]);
+        g.vertex(top.position[0] * outerRadius, top.position[1] * outerRadius, top.position[2] * outerRadius, sample.tau, top.latitude);
+        g.vertex(top.position[0] * innerRadius, top.position[1] * innerRadius, top.position[2] * innerRadius, sample.tau, top.latitude + 0.01);
     }
-
-    // 現在剥き進めている周回内の判定
-    const currentKnifeAngle = (progress * TWO_PI * spiralTurns) % TWO_PI;
-    const latFraction = (currentLatThreshold - normalizedLat) * spiralTurns; // 0.0 〜 1.0
-    const boundaryAngle = (currentKnifeAngle - latFraction * TWO_PI + TWO_PI * 4) % TWO_PI;
-
-    // 角度差による剥離状態判定
-    let angleDifference = (longitudeAngle - boundaryAngle + TWO_PI) % TWO_PI;
-    return angleDifference > Math.PI;
+    g.endShape();
+    renderedVertexCount += mesh.rows.length * 2 + samples.length * 2;
 }
 
 /**
- * ベクトル空間内で直接頂点を構築し、破綻なく接平面に寄り添う3D果物ナイフを描画する関数
- * @param {number} latitudeNormalized 切れ目の緯度正規化値
- * @param {number} longitudeAngle 切れ目の経度ラジアン
- * @param {number} contactRadius 切断接触面の半径
- * @param {number} progressNormalized 剥離進行度
+ * 剥がれた皮のリボンを描画する関数
+ * 刃先では剥離帯と完全に一致し、離れるにつれて曲面から浮き上がり、
+ * ナイフの下へ螺旋状に垂れ下がる (剥き終わるとリリース区間で落下して消える)
  */
-function renderPeelingKnife(latitudeNormalized, longitudeAngle, contactRadius, progressNormalized) {
+function renderPeelingRibbonStrip(g, mesh, state, appleBaseRadius, outerTexture, innerTexture) {
+    if (state.knifeTau <= mesh.tauStart + 0.02) return;
+
+    const releaseFade = 1 - smoothStep(0.45, 1.0, state.releaseProgress);
+    if (releaseFade <= 0.001) return;
+
+    const curlIntensity = sketchParameters.peelCurlCurvature;
+    const widthFactor = 0.35 + clamp01((sketchParameters.peelRibbonWidth - 0.10) / 0.45) * 0.65;
+    const bandWidthPixels = state.latitudeStep * Math.PI * appleBaseRadius * 1.05;
+    const coilWidth = bandWidthPixels * widthFactor;
+    const flareAngle = 0.2 + 0.22 * curlIntensity;
+    const hangPitch = coilWidth * Math.cos(flareAngle) * 1.15 + 4;
+    const coilGap = 4 + 3 * curlIntensity;
+    const cupDepth = 3 * curlIntensity;
+    // カールが強いほど垂れ下がる螺旋の半径が小さく巻きがきつくなる
+    const coilRadius = appleBaseRadius * 0.5 / (0.6 + 0.35 * curlIntensity);
+    const detachTurns = 0.3;
+
+    // 垂れ下がりの起点 = ナイフ位置 (剥き終わり後はその位置で固定し、そこから落下させる)
+    const anchorTau = Math.min(state.knifeTau, mesh.tauEnd);
+    const anchorLatitude = (bandLatitude(anchorTau, 0, state.latitudeStep) + bandLatitude(anchorTau, 1, state.latitudeStep)) * 0.5;
+    const anchorHeight = appleUnitPoint(anchorLatitude, 0)[1] * appleBaseRadius;
+    const anchorLongitude = anchorTau * TWO_PI;
+    const outward = [Math.sin(anchorLongitude), 0, Math.cos(anchorLongitude)];
+    const forward = [Math.cos(anchorLongitude), 0, -Math.sin(anchorLongitude)]; // 経度が増える (刃が進む) 向き
+    const fallDrop = state.releaseProgress * state.releaseProgress * appleBaseRadius * 4.5;
+    const fallSpread = 1 + state.releaseProgress * 0.3;
+
+    const samples = collectSpiralSamples(mesh, mesh.tauStart, anchorTau);
+    if (samples.length < 2) return;
+
+    const rowCount = mesh.rows.length;
+    const grid = []; // grid[sample][row] = {position, latitude}
+    for (const sample of samples) {
+        const turnsBehind = anchorTau - sample.tau;
+        const detach = smoothStep(0.0, detachTurns, turnsBehind);
+        // ナイフ位置から刃の後方へ巻きながら垂れ下がる螺旋 (軸はナイフ側に寄り、りんごの外側に沿う)
+        const coilAngle = turnsBehind * TWO_PI;
+        // 刃の直後は重力でまっすぐ垂れ、離れるほど螺旋の半径が育つ
+        const initialDrop = appleBaseRadius * 0.55 * (1 - Math.exp(-turnsBehind / 0.35));
+        const coilCenterHeight = anchorHeight + hangPitch * turnsBehind + initialDrop;
+        const growingCoilRadius = coilRadius * (0.3 + 0.7 * smoothStep(0.0, 1.2, turnsBehind));
+        const radialUnit = vec3Add(vec3Scale(outward, Math.cos(coilAngle)), vec3Scale(forward, Math.sin(coilAngle)));
+        // 螺旋軸の位置は帯の幅全体で共通 (帯がかかる高さ範囲でのりんごの最大半径の外側)
+        const halfSpan = coilWidth * 0.5;
+        let appleRadiusAround = 0;
+        for (const offset of [-halfSpan, 0, halfSpan]) {
+            appleRadiusAround = Math.max(appleRadiusAround, getAppleUnitRadiusAtHeight((coilCenterHeight + offset) / appleBaseRadius));
+        }
+        const axisDistance = appleRadiusAround * appleBaseRadius + growingCoilRadius + coilGap;
+
+        const column = [];
+        for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+            const row = mesh.rows[rowIndex];
+            const attached = readSpiralSample(mesh, row, sample);
+            const attachedPoint = vec3Scale(attached.position, appleBaseRadius);
+
+            // 帯の上端ほど外側へ開き、断面は外側へ反る
+            const across = row.v - 0.5;
+            const coilHeight = coilCenterHeight - across * coilWidth * Math.cos(flareAngle);
+            const localRadius = growingCoilRadius + across * coilWidth * Math.sin(flareAngle) + cupDepth * (1 - 4 * across * across);
+            const coilPoint = [
+                outward[0] * axisDistance - radialUnit[0] * localRadius,
+                coilHeight,
+                outward[2] * axisDistance - radialUnit[2] * localRadius
+            ];
+
+            // 円柱座標 (りんご中心軸まわりの角度・半径・高さ) で補間し、本体内部を横切らないようにする
+            let point = interpolateCylindrical(attachedPoint, coilPoint, detach);
+
+            // 刃先直後の浮き上がり (カール) と、本体へのめり込み防止 (りんご中心から放射方向へ押し出す)
+            const lift = Math.sin(Math.PI * Math.min(1, turnsBehind / detachTurns)) * (3 + 5 * curlIntensity);
+            const horizontalRadius = Math.hypot(point[0], point[2]);
+            if (horizontalRadius > 1e-6) {
+                const liftScale = (horizontalRadius + lift) / horizontalRadius;
+                point[0] *= liftScale;
+                point[2] *= liftScale;
+            }
+            point = pushPointOutsideApple(point, appleBaseRadius, 0.8 + detach * coilGap * 0.5);
+
+            point = [point[0] * fallSpread, point[1] + fallDrop, point[2] * fallSpread];
+            column.push({ position: point, latitude: attached.latitude });
+        }
+        grid.push(column);
+    }
+
+    // 法線 (数値差分)。帯の (τ, v) の向きから一貫して求めることで、螺旋のどの位置でも表裏が入れ替わらない
+    for (let sampleIndex = 0; sampleIndex < grid.length; sampleIndex++) {
+        const previous = grid[Math.max(0, sampleIndex - 1)];
+        const next = grid[Math.min(grid.length - 1, sampleIndex + 1)];
+        for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+            const alongStrip = vec3Sub(next[rowIndex].position, previous[rowIndex].position);
+            const acrossStrip = vec3Sub(grid[sampleIndex][Math.min(rowCount - 1, rowIndex + 1)].position, grid[sampleIndex][Math.max(0, rowIndex - 1)].position);
+            const fallback = mesh.rows[rowIndex].normals[0];
+            grid[sampleIndex][rowIndex].normal = vec3Normalize(vec3Cross(acrossStrip, alongStrip), fallback);
+        }
+    }
+
+    // 表 (外皮) と裏 (内層色) の2枚を僅かにずらして重ね、両面を表現する
+    const layerOffset = 0.6;
+    if (releaseFade < 1) g.tint(255, 255 * releaseFade);
+    for (const layer of [{ tex: outerTexture, sign: 1 }, { tex: innerTexture, sign: -1 }]) {
+        g.texture(layer.tex);
+        for (let rowIndex = 0; rowIndex < rowCount - 1; rowIndex++) {
+            g.beginShape(TRIANGLE_STRIP);
+            for (let sampleIndex = 0; sampleIndex < grid.length; sampleIndex++) {
+                for (const offsetRow of [rowIndex, rowIndex + 1]) {
+                    const cell = grid[sampleIndex][offsetRow];
+                    const n = cell.normal;
+                    const p = vec3Add(cell.position, vec3Scale(n, layerOffset * layer.sign));
+                    g.normal(n[0] * layer.sign, n[1] * layer.sign, n[2] * layer.sign);
+                    g.vertex(p[0], p[1], p[2], samples[sampleIndex].tau, cell.latitude);
+                }
+            }
+            g.endShape();
+            renderedVertexCount += grid.length * 2;
+        }
+    }
+    if (releaseFade < 1) g.tint(255, 255); // WEBGL では noTint() が null を設定し描画が落ちるため明示的に戻す
+}
+
+/**
+ * 2点を円柱座標 (y 軸まわり) で補間する関数 (角度は近い側を回る)
+ */
+function interpolateCylindrical(from, to, t) {
+    const angleFrom = Math.atan2(from[0], from[2]);
+    let angleTo = Math.atan2(to[0], to[2]);
+    while (angleTo - angleFrom > Math.PI) angleTo -= TWO_PI;
+    while (angleTo - angleFrom < -Math.PI) angleTo += TWO_PI;
+    const angle = angleFrom + (angleTo - angleFrom) * t;
+    const radius = Math.hypot(from[0], from[2]) * (1 - t) + Math.hypot(to[0], to[2]) * t;
+    const height = from[1] + (to[1] - from[1]) * t;
+    return [radius * Math.sin(angle), height, radius * Math.cos(angle)];
+}
+
+/**
+ * 点がりんご内部にある場合、中心からの放射方向に表面 (+余白) まで押し出す関数
+ */
+function pushPointOutsideApple(point, appleBaseRadius, clearance) {
+    const isInside = (scale) => {
+        const height = point[1] * scale / appleBaseRadius;
+        const appleRadius = getAppleUnitRadiusAtHeight(height);
+        if (appleRadius <= 0) return false; // りんごの上下範囲外 (真下に垂れた部分など) は対象外
+        const limit = appleRadius * appleBaseRadius + clearance;
+        return Math.hypot(point[0], point[2]) * scale < limit;
+    };
+    if (!isInside(1)) return point;
+    let low = 1;
+    let high = 2;
+    while (isInside(high) && high < 64) high *= 2;
+    for (let iteration = 0; iteration < 10; iteration++) {
+        const mid = (low + high) * 0.5;
+        if (isInside(mid)) low = mid; else high = mid;
+    }
+    return vec3Scale(point, high);
+}
+
+/**
+ * 果物ナイフを描画する関数
+ * 刃は剥いている帯を横切る向きに寝かせ (刃先 = 剥離済み側 / 柄 = 未剥離側)、
+ * 刃の切れ刃が螺旋の進行方向を向いて皮の下へ潜り込む
+ */
+function renderPeelingKnife(g, state, appleBaseRadius, peelThickness) {
     if (!sketchParameters.isKnifeVisible) return;
-    if (progressNormalized <= 0.015 || progressNormalized >= 0.985) return;
 
-    // 接触位置における接平面フレーム (位置, 法線, 切断接線, 従法線)
-    const frame = getAppleSurfaceFrame(latitudeNormalized, longitudeAngle, contactRadius);
+    const frame = getAppleCuttingFrame(state.knifeLatitude, state.knifeLongitude, state.latitudeStep);
 
-    // 切削部での微小なスライシング前後振動 (包丁で引くような微振動)
-    const slicingVibration = Math.sin(millis() * 0.045) * 1.6;
-    const contactPoint = p5.Vector.add(
-        frame.surfacePosition,
-        p5.Vector.mult(frame.tangentCut, slicingVibration)
+    // 正規直交基底
+    // axisLength: 刃渡り方向 (+ = 柄側。帯を横切って未剥離側へ、わずかに外へ逃がす)
+    // axisWidth : 刃の幅方向 (0 = 切れ刃 / + = 峰。進行方向の逆)
+    // axisThick : 刃の厚み方向 (曲面法線)
+    const axisLength = vec3Normalize(vec3Add(vec3Scale(frame.across, -1), vec3Scale(frame.normal, 0.1)));
+    const axisWidth = vec3Scale(frame.cut, -1);
+    const axisThick = vec3Normalize(vec3Cross(axisLength, axisWidth));
+    const thickSign = vec3Dot(axisThick, frame.normal) >= 0 ? 1 : -1;
+    const axisNormal = vec3Scale(axisThick, thickSign);
+
+    // 切削中は刃渡り方向に小さく前後させる (包丁で引くような微振動)
+    const isCutting = state.releaseProgress <= 0;
+    const slicingVibration = isCutting ? Math.sin(state.peelProgress * 900) * 1.4 : 0;
+    const surfacePoint = vec3Scale(frame.position, appleBaseRadius);
+    const origin = vec3Add(
+        vec3Add(surfacePoint, vec3Scale(frame.normal, -peelThickness * 0.5 + state.knifeLift)),
+        vec3Scale(axisLength, slicingVibration)
     );
 
-    // 正規直交基底の決定
-    // directionLength: 刃渡り方向 (切断接線の逆方向 = 柄が後方へ伸びる)
-    // directionWidth: 刃の幅・高さ方向 (接平面内の従法線)
-    // directionThick: 刃の厚み方向 (曲面法線 = 刃の平らな面が接平面に寄り添う)
-    const directionLength = p5.Vector.mult(frame.tangentCut, -1.0).normalize();
-    const directionWidth = frame.binormal.copy().normalize();
-    const directionThick = frame.surfaceNormal.copy().normalize();
+    const unit = sketchParameters.knifeScale * 2.3;
+    const toWorld = (a, w, t) => [
+        origin[0] + (axisLength[0] * a + axisWidth[0] * w + axisNormal[0] * t) * unit,
+        origin[1] + (axisLength[1] * a + axisWidth[1] * w + axisNormal[1] * t) * unit,
+        origin[2] + (axisLength[2] * a + axisWidth[2] * w + axisNormal[2] * t) * unit
+    ];
 
-    // りんご（半径140px）に対して堂々とした果物ナイフのスケール（倍率2.8倍基準）
-    const knifeScaleFactor = sketchParameters.knifeScale * 2.8;
+    g.push();
 
-    /**
-     * ローカル座標 (lengthX, widthY, thickZ) をワールド3D座標へ変換する内部関数
-     */
-    const transformLocalToWorld = (lengthOffset, widthOffset, thickOffset) => {
-        const scaledLength = lengthOffset * knifeScaleFactor;
-        const scaledWidth = widthOffset * knifeScaleFactor;
-        const scaledThick = thickOffset * knifeScaleFactor;
-
-        return createVector(
-            contactPoint.x + directionLength.x * scaledLength + directionWidth.x * scaledWidth + directionThick.x * scaledThick,
-            contactPoint.y + directionLength.y * scaledLength + directionWidth.y * scaledWidth + directionThick.y * scaledThick,
-            contactPoint.z + directionLength.z * scaledLength + directionWidth.z * scaledWidth + directionThick.z * scaledThick
-        );
-    };
-
-    push();
-
-    // 1. 鋼の刃 (Steel Blade)
-    specularMaterial(240, 245, 255);
-    shininess(95);
-    fill(228, 235, 246);
-    stroke(150, 165, 180);
-    strokeWeight(0.5);
-
-    // 刃の各代表頂点 (刃渡り長: 約135px, 刃幅: 約26px, 厚み: 約2px)
-    const bladeTip = transformLocalToWorld(-7, 0, 0);          // 刃先先端 (切削境界に刺さる)
-    const bladeHeel = transformLocalToWorld(42, 0, 0);         // 刃元エッジ
-    const spineTip = transformLocalToWorld(-3, 8.5, 0.4);      // 峰先端 (表)
-    const spineHeelPos = transformLocalToWorld(42, 9.5, 0.4);  // 峰刃元 (表)
-    const spineTipNeg = transformLocalToWorld(-3, 8.5, -0.4);  // 峰先端 (裏)
-    const spineHeelNeg = transformLocalToWorld(42, 9.5, -0.4); // 峰刃元 (裏)
-
-    beginShape(TRIANGLES);
-    // 表側側面
-    vertex(bladeTip.x, bladeTip.y, bladeTip.z);
-    vertex(spineHeelPos.x, spineHeelPos.y, spineHeelPos.z);
-    vertex(bladeHeel.x, bladeHeel.y, bladeHeel.z);
-
-    vertex(bladeTip.x, bladeTip.y, bladeTip.z);
-    vertex(spineTip.x, spineTip.y, spineTip.z);
-    vertex(spineHeelPos.x, spineHeelPos.y, spineHeelPos.z);
-
-    // 裏側側面
-    vertex(bladeTip.x, bladeTip.y, bladeTip.z);
-    vertex(bladeHeel.x, bladeHeel.y, bladeHeel.z);
-    vertex(spineHeelNeg.x, spineHeelNeg.y, spineHeelNeg.z);
-
-    vertex(bladeTip.x, bladeTip.y, bladeTip.z);
-    vertex(spineHeelNeg.x, spineHeelNeg.y, spineHeelNeg.z);
-    vertex(spineTipNeg.x, spineTipNeg.y, spineTipNeg.z);
-
-    // 峰の厚み面
-    vertex(spineTipNeg.x, spineTipNeg.y, spineTipNeg.z);
-    vertex(spineHeelNeg.x, spineHeelNeg.y, spineHeelNeg.z);
-    vertex(spineHeelPos.x, spineHeelPos.y, spineHeelPos.z);
-
-    vertex(spineTipNeg.x, spineTipNeg.y, spineTipNeg.z);
-    vertex(spineHeelPos.x, spineHeelPos.y, spineHeelPos.z);
-    vertex(spineTip.x, spineTip.y, spineTip.z);
-    endShape();
-    renderedVertexCount += 18;
+    // 1. 鋼の刃 (切れ刃から峰へ向かって厚みが増す)
+    g.specularMaterial(235, 240, 250);
+    g.shininess(90);
+    g.fill(214, 222, 234);
+    const edgeLine = [[-40, 0.4], [-28, 0.1], [-16, 0], [-4, 0], [8, 0]];
+    const spineLine = [[-40, 0.4], [-35, 4.6], [-25, 7.6], [-8, 8.4], [8, 8.6]];
+    const spineHalfThick = 0.55;
+    const thicknessAt = (w) => spineHalfThick * Math.min(1, w / 8.6);
+    for (const side of [1, -1]) {
+        g.beginShape(TRIANGLE_STRIP);
+        g.normal(axisNormal[0] * side, axisNormal[1] * side, axisNormal[2] * side);
+        for (let i = 0; i < edgeLine.length; i++) {
+            const e = toWorld(edgeLine[i][0], edgeLine[i][1], 0);
+            const s = toWorld(spineLine[i][0], spineLine[i][1], thicknessAt(spineLine[i][1]) * side);
+            g.vertex(e[0], e[1], e[2]);
+            g.vertex(s[0], s[1], s[2]);
+        }
+        g.endShape();
+    }
+    // 峰の面
+    g.beginShape(TRIANGLE_STRIP);
+    g.normal(axisWidth[0], axisWidth[1], axisWidth[2]);
+    for (const point of spineLine) {
+        const half = thicknessAt(point[1]);
+        const front = toWorld(point[0], point[1], half);
+        const back = toWorld(point[0], point[1], -half);
+        g.vertex(front[0], front[1], front[2]);
+        g.vertex(back[0], back[1], back[2]);
+    }
+    g.endShape();
+    renderedVertexCount += edgeLine.length * 4 + spineLine.length * 2;
 
     // 2. 金属口金 (Bolster)
-    specularMaterial(215, 220, 230);
-    fill(200, 205, 215);
-    noStroke();
-    renderBoxFromDirectBasis(transformLocalToWorld(45, 4.5, 0), directionLength, directionWidth, directionThick, 6 * knifeScaleFactor, 10 * knifeScaleFactor, 3.8 * knifeScaleFactor);
+    g.specularMaterial(205, 210, 220);
+    g.fill(190, 196, 206);
+    renderOrientedBox(g, toWorld(10, 4.6, 0.6), axisLength, axisWidth, axisNormal, 4 * unit, 10 * unit, 3.6 * unit);
 
     // 3. 木製ハンドル (Handle)
-    ambientMaterial(65, 34, 18);
-    fill(75, 38, 20);
-    renderBoxFromDirectBasis(transformLocalToWorld(72, 4.5, 0), directionLength, directionWidth, directionThick, 48 * knifeScaleFactor, 9.2 * knifeScaleFactor, 4.6 * knifeScaleFactor);
+    g.ambientMaterial(95, 52, 28);
+    g.specularMaterial(70, 40, 22);
+    g.shininess(20);
+    g.fill(92, 48, 26);
+    renderOrientedBox(g, toWorld(33, 4.6, 1.0), axisLength, axisWidth, axisNormal, 42 * unit, 9.2 * unit, 4.8 * unit);
 
     // 4. ハンドルの真鍮リベット (Brass Rivets)
-    fill(218, 165, 32);
-    specularMaterial(240, 200, 80);
-    renderBoxFromDirectBasis(transformLocalToWorld(60, 4.5, 0), directionLength, directionWidth, directionThick, 2.5 * knifeScaleFactor, 2.5 * knifeScaleFactor, 5.0 * knifeScaleFactor);
-    renderBoxFromDirectBasis(transformLocalToWorld(76, 4.5, 0), directionLength, directionWidth, directionThick, 2.5 * knifeScaleFactor, 2.5 * knifeScaleFactor, 5.0 * knifeScaleFactor);
+    g.specularMaterial(240, 200, 80);
+    g.shininess(60);
+    g.fill(212, 160, 40);
+    for (const rivetA of [22, 44]) {
+        renderOrientedBox(g, toWorld(rivetA, 4.6, 1.0), axisLength, axisWidth, axisNormal, 2.4 * unit, 2.4 * unit, 5.2 * unit);
+    }
 
-    pop();
+    g.pop();
 }
 
 /**
- * 任意の直交基底ベクトルに基づいて直方体メッシュを描画するヘルパー関数
+ * 任意の直交基底ベクトルに沿った直方体を法線付きで描画するヘルパー関数
  */
-function renderBoxFromDirectBasis(centerVector, axisX, axisY, axisZ, sizeX, sizeY, sizeZ) {
-    const halfX = sizeX * 0.5;
-    const halfY = sizeY * 0.5;
-    const halfZ = sizeZ * 0.5;
+function renderOrientedBox(g, center, axisX, axisY, axisZ, sizeX, sizeY, sizeZ) {
+    const axes = [axisX, axisY, axisZ];
+    const halfSizes = [sizeX * 0.5, sizeY * 0.5, sizeZ * 0.5];
+    const corner = (sx, sy, sz) => [
+        center[0] + axisX[0] * halfSizes[0] * sx + axisY[0] * halfSizes[1] * sy + axisZ[0] * halfSizes[2] * sz,
+        center[1] + axisX[1] * halfSizes[0] * sx + axisY[1] * halfSizes[1] * sy + axisZ[1] * halfSizes[2] * sz,
+        center[2] + axisX[2] * halfSizes[0] * sx + axisY[2] * halfSizes[1] * sy + axisZ[2] * halfSizes[2] * sz
+    ];
 
-    const corners = [];
-    for (let signX of [-1, 1]) {
-        for (let signY of [-1, 1]) {
-            for (let signZ of [-1, 1]) {
-                corners.push(createVector(
-                    centerVector.x + axisX.x * (halfX * signX) + axisY.x * (halfY * signY) + axisZ.x * (halfZ * signZ),
-                    centerVector.y + axisX.y * (halfX * signX) + axisY.y * (halfY * signY) + axisZ.y * (halfZ * signZ),
-                    centerVector.z + axisX.z * (halfX * signX) + axisY.z * (halfY * signY) + axisZ.z * (halfZ * signZ)
-                ));
+    g.beginShape(TRIANGLES);
+    for (let axisIndex = 0; axisIndex < 3; axisIndex++) {
+        for (const sign of [-1, 1]) {
+            const n = vec3Scale(axes[axisIndex], sign);
+            // 面上の4隅 (他の2軸を ±1 で走査)
+            const quad = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s1, s2]) => {
+                const signs = [0, 0, 0];
+                signs[axisIndex] = sign;
+                signs[(axisIndex + 1) % 3] = s1;
+                signs[(axisIndex + 2) % 3] = s2;
+                return corner(signs[0], signs[1], signs[2]);
+            });
+            for (const index of [0, 1, 2, 0, 2, 3]) {
+                g.normal(n[0], n[1], n[2]);
+                g.vertex(quad[index][0], quad[index][1], quad[index][2]);
             }
         }
     }
-
-    // 6面を描画
-    const faceIndices = [
-        [0, 1, 3, 2], [4, 6, 7, 5],
-        [0, 4, 5, 1], [2, 3, 7, 6],
-        [0, 2, 6, 4], [1, 5, 7, 3]
-    ];
-
-    beginShape(TRIANGLES);
-    for (let face of faceIndices) {
-        const p0 = corners[face[0]];
-        const p1 = corners[face[1]];
-        const p2 = corners[face[2]];
-        const p3 = corners[face[3]];
-
-        vertex(p0.x, p0.y, p0.z);
-        vertex(p1.x, p1.y, p1.z);
-        vertex(p2.x, p2.y, p2.z);
-
-        vertex(p0.x, p0.y, p0.z);
-        vertex(p2.x, p2.y, p2.z);
-        vertex(p3.x, p3.y, p3.z);
-        renderedVertexCount += 6;
-    }
-    endShape();
-}
-
-/**
- * 切断刃先から後方へ伸び、自然に外側へカールする螺旋リボンを描画する関数
- * @param {number} progress 局所剥離進行度 (0.0 - 1.0)
- * @param {boolean} isFleshPeel 果肉剥きフェーズか否か
- * @param {number} appleBaseRadius りんごの基準半径
- */
-function renderPeelingRibbonStrip(progress, isFleshPeel, appleBaseRadius) {
-    if (progress <= 0.02) return;
-
-    const totalStripSamples = 120;
-    const currentDrawnSamples = Math.floor(totalStripSamples * Math.min(1.0, progress * 1.05));
-    const spiralTurns = sketchParameters.spiralTurnCount;
-    const ribbonWidthBase = (appleBaseRadius * Math.PI / spiralTurns) * sketchParameters.peelRibbonWidth;
-    const curlIntensity = sketchParameters.peelCurlCurvature;
-
-    const ribbonTexture = isFleshPeel ? appleFleshProceduralTexture : appleSkinProceduralTexture;
-    texture(ribbonTexture);
-    noStroke();
-
-    beginShape(TRIANGLE_STRIP);
-    for (let sampleCounter = 0; sampleCounter < currentDrawnSamples; sampleCounter++) {
-        // ナイフ刃先 (sampleNormalized = progress) を先頭とし、後方へ向かってサンプリング
-        const sampleNormalized = progress * (sampleCounter / currentDrawnSamples);
-        const sampleLatitude = constrain(0.04 + sampleNormalized * 0.90, 0.04, 0.94);
-        const sampleLongitude = sampleNormalized * TWO_PI * spiralTurns;
-
-        const frame = getAppleSurfaceFrame(sampleLatitude, sampleLongitude, appleBaseRadius);
-
-        // 刃先（切断点）からの遅れ距離
-        const distanceBehindBlade = Math.max(0, progress - sampleNormalized);
-
-        // 1. 曲面法線 (Normal) 方向への持ち上がり (刃先ではゼロで密着)
-        const outwardLift = Math.pow(distanceBehindBlade, 1.4) * 55.0 * curlIntensity;
-
-        // 2. 切断方向の逆向きへの反り返りカール
-        const curlBackVector = p5.Vector.mult(frame.tangentCut, -Math.sin(distanceBehindBlade * 6.0) * 14.0 * curlIntensity);
-
-        // 3. 重力による自然な垂れ下がり
-        const gravityDrop = createVector(0, Math.pow(distanceBehindBlade, 2.0) * 35.0, 0);
-
-        // リボンの中心線位置
-        const ribbonCenter = p5.Vector.add(frame.surfacePosition, p5.Vector.mult(frame.surfaceNormal, outwardLift));
-        ribbonCenter.add(curlBackVector);
-        ribbonCenter.add(gravityDrop);
-
-        // 面方向: リボンの幅方向を接平面内の従法線 (Binormal) に沿わせることで、剥がれる瞬間は曲面に完全に密着
-        const halfWidthVector = p5.Vector.mult(frame.binormal, ribbonWidthBase * 0.5);
-
-        const ribbonLeftEdge = p5.Vector.sub(ribbonCenter, halfWidthVector);
-        const ribbonRightEdge = p5.Vector.add(ribbonCenter, halfWidthVector);
-
-        const textureU = (sampleCounter % 12) / 12.0;
-        vertex(ribbonLeftEdge.x, ribbonLeftEdge.y, ribbonLeftEdge.z, textureU, 0);
-        vertex(ribbonRightEdge.x, ribbonRightEdge.y, ribbonRightEdge.z, textureU, 1);
-        renderedVertexCount += 2;
-    }
-    endShape();
+    g.endShape();
+    renderedVertexCount += 36;
 }
 
 /**
  * りんごの上部の軸を描画する関数
- * @param {number} appleBaseRadius 
  */
-function renderAppleStem(appleBaseRadius) {
-    push();
+function renderAppleStem(g, appleBaseRadius) {
+    g.push();
     const stemRgb = convertHexToRgb(sketchParameters.appleStemColorHex);
-    fill(stemRgb.r, stemRgb.g, stemRgb.b);
-    translate(0, -appleBaseRadius * 0.92, 0);
-    rotateZ(0.12);
-
-    cylinder(3.2, 34, 12, 1);
+    g.ambientMaterial(stemRgb.r, stemRgb.g, stemRgb.b);
+    g.fill(stemRgb.r, stemRgb.g, stemRgb.b);
+    g.translate(0, -appleBaseRadius * 1.02, 0);
+    g.rotateZ(0.12);
+    g.cylinder(3.2, 40, 12, 1);
     renderedVertexCount += 48;
-    pop();
+    g.pop();
 }
 
 /**

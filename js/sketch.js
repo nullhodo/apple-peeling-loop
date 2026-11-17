@@ -46,51 +46,10 @@ function draw() {
     const backgroundRgb = convertHexToRgb(sketchParameters.backgroundColorHex);
     background(backgroundRgb.r, backgroundRgb.g, backgroundRgb.b);
 
-    // 3. ライティング環境の構築 (柔らかなスタジオライティング)
-    ambientLight(150, 150, 155);
-    directionalLight(255, 250, 240, 0.7, -1.0, -0.6);
-    directionalLight(120, 140, 180, -0.7, 0.8, 0.5);
-    pointLight(255, 240, 220, 0, -250, 350);
-
-    // 4. カメラ & 全体視点制御 (ナイフ移動 vs ナイフ固定モードの切り替え)
-    push();
-
-    const isPeelingFleshPhase = loopPhase >= 0.5;
-    const localPhaseProgress = isPeelingFleshPhase ? (loopPhase - 0.5) * 2.0 : loopPhase * 2.0;
-
-    const thinPeelThicknessRatio = sketchParameters.peelThicknessRatio;
-    const balancedScaleFactor = 1.0 / (1.0 - thinPeelThicknessRatio * localPhaseProgress);
-
-    const appleBaseRadius = 140;
-    const spiralTurns = sketchParameters.spiralTurnCount;
-    const knifeLatitude = constrain(0.04 + localPhaseProgress * 0.90, 0.04, 0.94);
-    const knifeLongitude = (localPhaseProgress * TWO_PI * spiralTurns) % TWO_PI;
-
-    if (sketchParameters.knifeMotionMode === "fixed") {
-        // --- ナイフ固定モード (リンゴ側が自転・昇降してナイフに送られる) ---
-        const contactPointUnrotated = calculateAppleSurfacePoint(knifeLatitude, knifeLongitude, appleBaseRadius);
-
-        // 刃と接触面が最も見やすい斜め前方のアングルに構える
-        rotateX(0.24);
-        rotateY(Math.PI * 0.30);
-
-        // 切削接触点を常に定点（画面中央の高さ）へ保つための相殺変換
-        translate(0, -contactPointUnrotated.y, 0);
-        rotateY(-knifeLongitude);
-    } else {
-        // --- ナイフ移動モード (リンゴは自転し、ナイフが周囲を巡る) ---
-        const sceneRotationAngle = (currentTimestamp * 0.0006 * sketchParameters.autoRotationSpeed);
-        rotateY(sceneRotationAngle);
-        rotateX(0.28); // 緩やかな見下ろし角
-    }
-
-    // 5. 薄い皮の剥離厚み (約3.2%) と完全に釣り合う微小スケール拡大によるシームレスループ
-    push();
-    scale(balancedScaleFactor);
-    renderRecursiveAppleEntity(localPhaseProgress, isPeelingFleshPhase);
-    pop();
-
-    pop();
+    // 3-5. ライティング・視点制御・りんご本体 (剥離厚みと釣り合う微小スケール拡大でシームレスループ)
+    const sceneState = computePeelSceneState(currentTimestamp);
+    renderAppleScene(p5.instance, sceneState, currentTimestamp, width, height);
+    const balancedScaleFactor = sceneState.balancedScale;
 
     // 6. ポストプロセス: ざらついた質感 (フィルムグレイン) オーバーレイ
     if (sketchParameters.grainIntensity > 0.01) {

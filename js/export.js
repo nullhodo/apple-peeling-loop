@@ -15,64 +15,28 @@ function exportHighResolutionSnapshot() {
     // オフスクリーンWEBGLグラフィックスバッファの生成
     const highResolutionGraphics = createGraphics(exportTargetWidth, exportTargetHeight, WEBGL);
     highResolutionGraphics.pixelDensity(1);
+    // バッファ自身の寸法に合わせた既定カメラ・透視投影を明示的に設定 (メインキャンバス基準の視点を引き継がないようにする)
+    const defaultEyeDistance = (exportTargetHeight / 2) / Math.tan(Math.PI / 6);
+    highResolutionGraphics.camera(0, 0, defaultEyeDistance, 0, 0, 0, 0, 1, 0);
+    highResolutionGraphics.perspective(Math.PI / 3, exportTargetWidth / exportTargetHeight, defaultEyeDistance / 10, defaultEyeDistance * 10);
 
     // 背景描画
     const backgroundRgb = convertHexToRgb(sketchParameters.backgroundColorHex);
     highResolutionGraphics.background(backgroundRgb.r, backgroundRgb.g, backgroundRgb.b);
 
-    // ライティング
-    highResolutionGraphics.ambientLight(130, 130, 135);
-    highResolutionGraphics.directionalLight(255, 250, 240, 0.7, -1.0, -0.6);
-    highResolutionGraphics.directionalLight(120, 140, 180, -0.7, 0.8, 0.5);
+    // 現在の瞬間をそのままフリーズし、画面と同一のシーン (ナイフ・剥けた皮・視点モード含む) を高解像度で描画
+    const currentTimestamp = millis();
+    const sceneState = computePeelSceneState(currentTimestamp);
+    renderAppleScene(highResolutionGraphics, sceneState, currentTimestamp, exportTargetWidth, exportTargetHeight);
 
-    // 現在のループ進行度をそのままフリーズして高品質描画
-    const currentProgress = (millis() % sketchParameters.loopDurationMilliseconds) / sketchParameters.loopDurationMilliseconds;
-
-    highResolutionGraphics.push();
-    highResolutionGraphics.rotateY((millis() * 0.0006 * sketchParameters.autoRotationSpeed));
-    highResolutionGraphics.rotateX(0.28);
-
-    // 高解像度スケールでりんごをレンダリング
-    // (ここではhighResolutionGraphicsコンテキストに対して同一ロジックを適用)
-    renderHighResolutionAppleScene(highResolutionGraphics, currentProgress);
-    highResolutionGraphics.pop();
-
-    // 画像保存
+    // 画像保存 (保存後はオフスクリーンバッファを解放)
     save(highResolutionGraphics, `${baseFileIdentifier}.png`);
+    highResolutionGraphics.remove();
 
     // 同名でパラメータJSONファイルをダウンロード出力
     exportParametersToJsonFile(`${baseFileIdentifier}.json`);
 
     console.log(`[High-Res Export] Successfully exported ${baseFileIdentifier}.png + JSON`);
-}
-
-/**
- * オフスクリーン高解像度バッファ専用の描画パイプライン関数
- * @param {p5.Graphics} targetGraphics 
- * @param {number} loopPhase 
- */
-function renderHighResolutionAppleScene(targetGraphics, loopPhase) {
-    const isPeelingFleshPhase = loopPhase >= 0.5;
-    const localPhaseProgress = isPeelingFleshPhase ? (loopPhase - 0.5) * 2.0 : loopPhase * 2.0;
-    const thinPeelThicknessRatio = sketchParameters.peelThicknessRatio;
-    const balancedScaleFactor = 1.0 / (1.0 - thinPeelThicknessRatio * localPhaseProgress);
-
-    targetGraphics.push();
-    targetGraphics.scale(balancedScaleFactor);
-
-    targetGraphics.noStroke();
-    targetGraphics.texture(isPeelingFleshPhase ? appleFleshProceduralTexture : appleSkinProceduralTexture);
-    targetGraphics.sphere(140, 48, 48);
-
-    // ヘタ
-    targetGraphics.push();
-    const stemRgb = convertHexToRgb(sketchParameters.appleStemColorHex);
-    targetGraphics.fill(stemRgb.r, stemRgb.g, stemRgb.b);
-    targetGraphics.translate(0, -140 * 0.92, 0);
-    targetGraphics.cylinder(3.2, 34, 16, 1);
-    targetGraphics.pop();
-
-    targetGraphics.pop();
 }
 
 /* ==========================================================================
