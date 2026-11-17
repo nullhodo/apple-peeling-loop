@@ -124,8 +124,11 @@ function renderAppleScene(g, state, timeMilliseconds, viewportWidth, viewportHei
     if (sketchParameters.knifeMotionMode === "fixed") {
         // --- ナイフ固定モード (リンゴ側が自転・昇降してナイフに送られる) ---
         const contactHeight = appleUnitPoint(state.knifeLatitude, 0)[1] * APPLE_BASE_RADIUS * state.balancedScale;
+        // 右手で剥く構図: ナイフをりんごの右側に置き、切れ刃が手前のやや内側を向くようにする
+        // (螺旋の進行方向をそのまま回すと刃が奥を向くため、左右反転して巻き方向を逆にする)
         g.rotateX(-0.32);
-        g.rotateY(-Math.PI * 0.30);
+        g.scale(-1, 1, 1);
+        g.rotateY(-1.2);
         g.translate(0, -contactHeight - APPLE_BASE_RADIUS * 0.15, 0);
         g.rotateY(-state.knifeLongitude);
     } else {
