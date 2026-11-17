@@ -34,12 +34,12 @@ apple-peeling-loop/
 └── js/
     ├── audio.js        - Tone.jsによる剥離効果音の初期化と進行同期変調
     ├── export.js       - 2560px高解像度PNG書き出しと設定JSONの保存・復元
-    ├── geometry.js     - りんご表面のパラメトリック座標と接平面フレーム計算
+    ├── geometry.js     - りんご表面形状・螺旋帯メッシュ・切削フレームの計算
     ├── history.js      - Undo / Redo履歴スタック管理
     ├── palettes.js     - プリセットパレット定義と単色テーマ自動生成
     ├── randomizer.js   - 選択カテゴリのランダム設定と自動周期タイマー
     ├── recorder.js     - 60fps動画録画(MediaRecorder)とダウンロード処理
-    ├── renderer.js     - りんご本体・剥離リボン・ナイフ・グレインのWebGL描画
+    ├── renderer.js     - 剥離タイムライン算出とりんご本体・垂れ下がる皮・ナイフ・グレインのWebGL描画
     ├── sketch.js       - p5.jsの初期化とメイン描画ループ
     ├── state.js        - パラメータ初期値とグローバル状態変数の定義
     ├── textures.js     - 果皮・果肉・グレインノイズのプロシージャル生成
