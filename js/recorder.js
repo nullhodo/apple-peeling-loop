@@ -54,7 +54,7 @@ async function startRecordingPipeline(numberOfLoopsToRecord = 0) {
     if (numberOfLoopsToRecord > 0) {
         await renderLoopRecordingOffline(numberOfLoopsToRecord);
     } else {
-        recordingTimerIntervalId = setInterval(() => updateRecordingDurationDisplay(millis() - recordingStartTimestamp), 100);
+        recordingTimerIntervalId = setInterval(() => updateRecordingDurationDisplay(millis() - recordingStartTimestamp, null), 100);
     }
 }
 
@@ -161,6 +161,7 @@ async function renderLoopRecordingOffline(loopCount) {
     // ループの長さが 1/60 秒の整数倍とは限らないため、フレーム数を丸めて時刻の刻みをわずかに合わせる
     const totalFrames = Math.max(1, Math.round(recordingDuration / 1000 * RECORDING_FRAME_RATE));
     const sceneStartTimestamp = millis();
+    const videoDurationMilliseconds = totalFrames * 1000 / RECORDING_FRAME_RATE;
 
     noLoop();
     muteAudioForOfflineRendering();
@@ -174,10 +175,11 @@ async function renderLoopRecordingOffline(loopCount) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
             if (frameIndex % 6 === 0) {
-                updateRecordingDurationDisplay((frameIndex + 1) * 1000 / RECORDING_FRAME_RATE);
+                updateRecordingDurationDisplay((frameIndex + 1) * 1000 / RECORDING_FRAME_RATE, videoDurationMilliseconds);
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
         }
+        updateRecordingDurationDisplay(session.frameCount * 1000 / RECORDING_FRAME_RATE, videoDurationMilliseconds);
     } finally {
         offlineRenderTimestamp = null;
         loop();
@@ -245,9 +247,13 @@ function formatRecordingTime(milliseconds) {
 }
 
 /**
- * 録画時間を HUD に表示する関数
+ * 録画時間を HUD に表示する関数 (指定ループ数録画では「経過 / 終了時刻」の分数形式)
  * @param {number} elapsedMilliseconds 動画内の経過時間
+ * @param {number|null} totalMilliseconds 終了時刻 (手動録画では null)
  */
-function updateRecordingDurationDisplay(elapsedMilliseconds) {
-    document.getElementById('recording-timer').innerText = formatRecordingTime(elapsedMilliseconds);
+function updateRecordingDurationDisplay(elapsedMilliseconds, totalMilliseconds) {
+    const elapsedText = formatRecordingTime(Math.min(elapsedMilliseconds, totalMilliseconds ?? Infinity));
+    document.getElementById('recording-timer').innerText = totalMilliseconds === null
+        ? elapsedText
+        : `${elapsedText} / ${formatRecordingTime(totalMilliseconds)}`;
 }
