@@ -40,14 +40,13 @@ let appleSkinProceduralTexture = null;
 let appleFleshProceduralTexture = null;
 let grainNoiseOverlayTexture = null;
 
-// Video Recording Architecture (60fps High Bitrate)
-let mediaStreamRecorder = null;
-let recordedVideoDataChunks = [];
+// Video Recording Architecture (60fps mp4, WebCodecs + mp4-muxer)
+let recordingSession = null; // エンコーダ・マルチプレクサ・作業用キャンバスなど録画1回分の状態
 let isRecordingActive = false;
 let recordingStartTimestamp = 0;
 let recordingTimerIntervalId = null;
 let targetRecordingLoopCount = 0;
-let recordingInitialPhaseAccumulator = 0;
+let offlineRenderTimestamp = null; // 指定ループ数録画のオフライン描画中だけ、millis() の代わりに使う時刻
 
 // UI Auto-Hide Inactivity Timer
 let userInactivityTimeoutId = null;

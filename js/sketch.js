@@ -36,23 +36,13 @@ function draw() {
     renderedVertexCount = 0;
 
     // 1. ループ進行度 (loopPhase: 0.0 - 1.0) の算出
-    const currentTimestamp = millis();
-
-    // ループ指定録画の終了判定 (描画前に行い、先頭と同じ位相のフレームを末尾に含めない)
-    if (isRecordingActive && targetRecordingLoopCount > 0) {
-        const totalRecordingElapsedTime = currentTimestamp - recordingStartTimestamp;
-        const targetDurationLimit = targetRecordingLoopCount * getLoopDurationMilliseconds();
-        if (totalRecordingElapsedTime >= targetDurationLimit) {
-            console.log(`[Recorder] Exact ${targetRecordingLoopCount} loops reached. Stopping recording.`);
-            stopRecordingPipeline();
-        }
-    }
-
+    // 指定ループ数録画のオフライン描画中は、録画側が指定した時刻で描く
+    const currentTimestamp = offlineRenderTimestamp ?? millis();
     const sceneState = computePeelSceneState(currentTimestamp);
     const loopPhase = sceneState.loopPhase;
 
-    // オーディオ同期
-    updatePeelingAudioFeedback(sceneState);
+    // オーディオ同期 (オフライン描画中は実時間と合わないため鳴らさない)
+    if (offlineRenderTimestamp === null) updatePeelingAudioFeedback(sceneState);
 
     // 2. 背景描画
     const backgroundRgb = convertHexToRgb(sketchParameters.backgroundColorHex);
@@ -71,4 +61,7 @@ function draw() {
     if (isDebugModeEnabled) {
         updateDebugInformationOverlay(loopPhase, balancedScaleFactor);
     }
+
+    // 8. 手動録画中はこのフレームをエンコーダへ送る
+    captureRealtimeRecordingFrame();
 }
