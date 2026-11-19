@@ -26,6 +26,9 @@ let sketchParameters = {
 // Loop Clock (周期が変わっても位相が連続するよう時刻オフセットを保持)
 let loopClockDurationMilliseconds = null;
 let loopClockOffsetMilliseconds = 0;
+// 自転 (1ループあたりの整数回転数と、回転数が変わったときに角度を保つオフセット)
+let sceneRotationTurnsPerLoop = null;
+let sceneRotationOffsetAngle = 0;
 
 // Undo & Redo History Buffers
 const undoHistoryStack = [];

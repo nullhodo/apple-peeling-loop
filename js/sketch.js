@@ -48,7 +48,7 @@ function draw() {
     background(backgroundRgb.r, backgroundRgb.g, backgroundRgb.b);
 
     // 3-5. ライティング・視点制御・りんご本体 (剥離厚みと釣り合う微小スケール拡大でシームレスループ)
-    renderAppleScene(p5.instance, sceneState, currentTimestamp, width, height);
+    renderAppleScene(p5.instance, sceneState, width, height);
     const balancedScaleFactor = sceneState.balancedScale;
 
     // 6. ポストプロセス: ざらついた質感 (フィルムグレイン) オーバーレイ

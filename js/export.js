@@ -27,7 +27,7 @@ function exportHighResolutionSnapshot() {
     // 現在の瞬間をそのままフリーズし、画面と同一のシーン (ナイフ・剥けた皮・視点モード含む) を高解像度で描画
     const currentTimestamp = millis();
     const sceneState = computePeelSceneState(currentTimestamp);
-    renderAppleScene(highResolutionGraphics, sceneState, currentTimestamp, exportTargetWidth, exportTargetHeight);
+    renderAppleScene(highResolutionGraphics, sceneState, exportTargetWidth, exportTargetHeight);
 
     // 画像保存 (保存後はオフスクリーンバッファを解放)
     save(highResolutionGraphics, `${baseFileIdentifier}.png`);

@@ -44,6 +44,22 @@ function computeLoopPhase(timeMilliseconds) {
 }
 
 /**
+ * ナイフ移動モードでの自転角を求める関数
+ * 1ループで整数回だけ回るよう回転数を丸め、録画した N ループの映像が最初と最後でつながるようにする。
+ * 速さの変更で回転数が変わっても、その瞬間の角度を保つよう角度オフセットを付け替える
+ */
+function computeSceneRotationAngle(loopPhase) {
+    const turnsPerLoop = 0.0006 * sketchParameters.autoRotationSpeed * getLoopDurationMilliseconds() / TWO_PI;
+    const roundedTurns = turnsPerLoop === 0 ? 0 : Math.sign(turnsPerLoop) * Math.max(1, Math.round(Math.abs(turnsPerLoop)));
+    if (sceneRotationTurnsPerLoop !== null && sceneRotationTurnsPerLoop !== roundedTurns) {
+        const currentAngle = TWO_PI * sceneRotationTurnsPerLoop * loopPhase + sceneRotationOffsetAngle;
+        sceneRotationOffsetAngle = (currentAngle - TWO_PI * roundedTurns * loopPhase) % TWO_PI;
+    }
+    sceneRotationTurnsPerLoop = roundedTurns;
+    return TWO_PI * roundedTurns * loopPhase + sceneRotationOffsetAngle;
+}
+
+/**
  * 時刻から描画状態 (剥離進行度・ナイフ位置・スケール等) を算出する関数
  * @param {number} timeMilliseconds
  */
@@ -102,10 +118,9 @@ function computePeelSceneState(timeMilliseconds) {
  * ライティング・視点制御を含むシーン全体を描画する関数
  * @param {p5|p5.Graphics} g 描画先 (メインキャンバスまたはオフスクリーンWEBGLバッファ)
  * @param {object} state computePeelSceneState の戻り値
- * @param {number} timeMilliseconds 自動回転用の時刻
  * @param {number} viewportHeight 構図の基準とする描画先の高さ
  */
-function renderAppleScene(g, state, timeMilliseconds, viewportWidth, viewportHeight) {
+function renderAppleScene(g, state, viewportWidth, viewportHeight) {
     // テクスチャ座標は (u = 周回 τ, v = 緯度) の正規化値で与える (横方向は1周ごとに繰り返す)
     g.textureMode(NORMAL);
     g.textureWrap(REPEAT, REPEAT);
@@ -133,7 +148,7 @@ function renderAppleScene(g, state, timeMilliseconds, viewportWidth, viewportHei
         g.rotateY(-state.knifeLongitude);
     } else {
         // --- ナイフ移動モード (リンゴは自転し、ナイフが周囲を巡る) ---
-        const sceneRotationAngle = timeMilliseconds * 0.0006 * sketchParameters.autoRotationSpeed;
+        const sceneRotationAngle = computeSceneRotationAngle(state.loopPhase);
         g.translate(0, -APPLE_BASE_RADIUS * 0.3, 0);
         g.rotateX(-0.30); // 緩やかな見下ろし角 (先に傾けてから自転させ、軸がぶれないようにする)
         g.rotateY(sceneRotationAngle);
