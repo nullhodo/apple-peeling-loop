@@ -37,6 +37,17 @@ function draw() {
 
     // 1. ループ進行度 (loopPhase: 0.0 - 1.0) の算出
     const currentTimestamp = millis();
+
+    // ループ指定録画の終了判定 (描画前に行い、先頭と同じ位相のフレームを末尾に含めない)
+    if (isRecordingActive && targetRecordingLoopCount > 0) {
+        const totalRecordingElapsedTime = currentTimestamp - recordingStartTimestamp;
+        const targetDurationLimit = targetRecordingLoopCount * getLoopDurationMilliseconds();
+        if (totalRecordingElapsedTime >= targetDurationLimit) {
+            console.log(`[Recorder] Exact ${targetRecordingLoopCount} loops reached. Stopping recording.`);
+            stopRecordingPipeline();
+        }
+    }
+
     const sceneState = computePeelSceneState(currentTimestamp);
     const loopPhase = sceneState.loopPhase;
 
@@ -59,15 +70,5 @@ function draw() {
     // 7. デバッグHUD情報更新
     if (isDebugModeEnabled) {
         updateDebugInformationOverlay(loopPhase, balancedScaleFactor);
-    }
-
-    // 8. ループ指定録画の進行監視
-    if (isRecordingActive && targetRecordingLoopCount > 0) {
-        const totalRecordingElapsedTime = currentTimestamp - recordingStartTimestamp;
-        const targetDurationLimit = targetRecordingLoopCount * getLoopDurationMilliseconds();
-        if (totalRecordingElapsedTime >= targetDurationLimit) {
-            console.log(`[Recorder] Exact ${targetRecordingLoopCount} loops reached. Stopping recording.`);
-            stopRecordingPipeline();
-        }
     }
 }
