@@ -367,6 +367,7 @@ function setupUserInactivityAutoHide() {
  */
 function resetUserInactivityTimer() {
     if (userInactivityTimeoutId) clearTimeout(userInactivityTimeoutId);
+    if (!isUiAutoHideEnabled) return;
     userInactivityTimeoutId = setTimeout(() => {
         if (isSidebarPanelOpened) {
             toggleSidebarVisibility();

@@ -49,6 +49,7 @@ let targetRecordingLoopCount = 0;
 let offlineRenderTimestamp = null; // 指定ループ数録画のオフライン描画中だけ、millis() の代わりに使う時刻
 
 // UI Auto-Hide Inactivity Timer
+let isUiAutoHideEnabled = false; // 無操作でサイドバーを自動で閉じるか (既定でオフ)
 let userInactivityTimeoutId = null;
 const INACTIVITY_DELAY_MILLISECONDS = 4500;
 let isSidebarPanelOpened = true;
