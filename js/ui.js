@@ -95,6 +95,12 @@ function setupUserInterfaceEventListeners() {
     bindColorPickerToParameter('picker-skin', 'text-skin', 'appleSkinColorHex', true);
     bindColorPickerToParameter('picker-flesh', 'text-flesh', 'appleFleshColorHex', true);
     bindColorPickerToParameter('picker-stem', 'text-stem', 'appleStemColorHex', false);
+    bindColorPickerToParameter('picker-alternate-skin', 'text-alternate-skin', 'alternateSkinColorHex', true);
+    document.getElementById('toggle-skin-alternation').addEventListener('change', (event) => {
+        sketchParameters.isSkinAlternationEnabled = event.target.checked;
+        generateProceduralTextures();
+        pushUndoSnapshot();
+    });
 
     // Undo / Redo
     document.getElementById('undo-button').addEventListener('click', executeUndoAction);
@@ -317,6 +323,10 @@ function updateColorPickerInputsUI() {
 
     document.getElementById('picker-stem').value = sketchParameters.appleStemColorHex;
     document.getElementById('text-stem').innerText = sketchParameters.appleStemColorHex;
+
+    document.getElementById('toggle-skin-alternation').checked = sketchParameters.isSkinAlternationEnabled;
+    document.getElementById('picker-alternate-skin').value = sketchParameters.alternateSkinColorHex;
+    document.getElementById('text-alternate-skin').innerText = sketchParameters.alternateSkinColorHex;
 }
 
 /**

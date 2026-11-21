@@ -12,6 +12,8 @@ let sketchParameters = {
     grainIntensity: 0.25,
     backgroundColorHex: "#0d1117",
     appleSkinColorHex: "#c81d25",
+    isSkinAlternationEnabled: false, // 1ループごとに果皮を appleSkinColorHex と alternateSkinColorHex で交互にする
+    alternateSkinColorHex: "#8cbf3f",
     appleFleshColorHex: "#f6ebc6",
     appleStemColorHex: "#57361e",
     activePaletteTitle: "普通のリンゴ",
@@ -38,6 +40,7 @@ const MAXIMUM_HISTORY_CAPACITY = 30;
 // Procedural Textures & Shading Resources
 let appleSkinProceduralTexture = null;
 let appleFleshProceduralTexture = null;
+let appleAlternateSkinProceduralTexture = null; // 果皮を交互にするときの2つ目の果皮
 let grainNoiseOverlayTexture = null;
 
 // Video Recording Architecture (60fps mp4, WebCodecs + mp4-muxer)

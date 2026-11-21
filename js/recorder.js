@@ -337,13 +337,20 @@ function captureRealtimeRecordingFrame() {
 /**
  * 指定ループ数を 1/60 秒刻みでオフライン描画して録画する関数
  */
-async function renderLoopRecordingOffline(loopCount) {
+async function renderLoopRecordingOffline(requestedLoopCount) {
     const session = recordingSession;
     const loopDuration = getLoopDurationMilliseconds();
+    // 果皮を交互にするときは2ループで元に戻るため、ループ数を2の倍数に切り上げる
+    const loopsPerCycle = sketchParameters.isSkinAlternationEnabled ? 2 : 1;
+    const loopCount = Math.ceil(requestedLoopCount / loopsPerCycle) * loopsPerCycle;
+    if (loopCount !== requestedLoopCount) console.log(`[Video Recorder] Loop count rounded up to ${loopCount} (skin alternation).`);
     const recordingDuration = loopCount * loopDuration;
     // ループの長さが 1/60 秒の整数倍とは限らないため、フレーム数を丸めて時刻の刻みをわずかに合わせる
     const totalFrames = Math.max(1, Math.round(recordingDuration / 1000 * RECORDING_FRAME_RATE));
-    const sceneStartTimestamp = millis();
+    // 剥き始める前のりんご (果皮を交互にするときは1つ目の果皮) から録れるよう、周期の先頭の時刻から描く
+    computeLoopPhase(millis());
+    const cycleDuration = loopsPerCycle * loopDuration;
+    const sceneStartTimestamp = Math.floor((millis() + loopClockOffsetMilliseconds) / cycleDuration) * cycleDuration - loopClockOffsetMilliseconds;
     const videoDurationMilliseconds = totalFrames * 1000 / RECORDING_FRAME_RATE;
     const sceneTimestamps = [];
 

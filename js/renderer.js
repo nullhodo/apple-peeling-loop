@@ -65,6 +65,8 @@ function computeSceneRotationAngle(loopPhase) {
  */
 function computePeelSceneState(timeMilliseconds) {
     const loopPhase = computeLoopPhase(timeMilliseconds);
+    // 何ループ目か (果皮を交互にするときに、どちらの果皮かを決める)
+    const loopIndex = Math.floor((timeMilliseconds + loopClockOffsetMilliseconds) / loopClockDurationMilliseconds);
     const isFleshPeel = loopPhase >= 0.5;
     const localPhase = isFleshPeel ? (loopPhase - 0.5) * 2.0 : loopPhase * 2.0;
 
@@ -99,6 +101,7 @@ function computePeelSceneState(timeMilliseconds) {
 
     return {
         loopPhase,
+        loopIndex,
         isFleshPeel,
         localPhase,
         peelProgress,
@@ -170,9 +173,10 @@ function renderRecursiveAppleEntity(g, state) {
     const peelThickness = appleBaseRadius * sketchParameters.peelThicknessRatio;
     const mesh = getSpiralBandMesh(state.turnCount);
 
-    // テクスチャの選択 (フェーズごとに表裏が循環反転)
-    const surfaceOuterTexture = state.isFleshPeel ? appleFleshProceduralTexture : appleSkinProceduralTexture;
-    const subsurfaceTexture = state.isFleshPeel ? appleSkinProceduralTexture : appleFleshProceduralTexture;
+    // テクスチャの選択 (フェーズごとに表裏が循環反転し、果肉を剥くと次のループの果皮が現れる)
+    const skinTextures = getSkinTexturesForLoop(state.loopIndex);
+    const surfaceOuterTexture = state.isFleshPeel ? appleFleshProceduralTexture : skinTextures.current;
+    const subsurfaceTexture = state.isFleshPeel ? skinTextures.next : appleFleshProceduralTexture;
 
     g.noStroke();
 
@@ -191,6 +195,20 @@ function renderRecursiveAppleEntity(g, state) {
 
     // --- E. りんごの軸 / ヘタ (Stem) ---
     renderAppleStem(g, appleBaseRadius);
+}
+
+/**
+ * そのループで剥く果皮と、果肉を剥いた下から現れる次のループの果皮を返す関数
+ * 果皮を交互にするときは偶数ループが appleSkinColorHex、奇数ループが alternateSkinColorHex の果皮になる
+ */
+function getSkinTexturesForLoop(loopIndex) {
+    if (!sketchParameters.isSkinAlternationEnabled || !appleAlternateSkinProceduralTexture) {
+        return { current: appleSkinProceduralTexture, next: appleSkinProceduralTexture };
+    }
+    const isEvenLoop = ((loopIndex % 2) + 2) % 2 === 0;
+    return isEvenLoop
+        ? { current: appleSkinProceduralTexture, next: appleAlternateSkinProceduralTexture }
+        : { current: appleAlternateSkinProceduralTexture, next: appleSkinProceduralTexture };
 }
 
 /**
@@ -238,7 +256,7 @@ function readSpiralSample(mesh, row, sample) {
  */
 function applyAppleSurfaceMaterial(g, surfaceTexture) {
     g.texture(surfaceTexture);
-    if (surfaceTexture === appleSkinProceduralTexture) {
+    if (surfaceTexture === appleSkinProceduralTexture || surfaceTexture === appleAlternateSkinProceduralTexture) {
         const gloss = SURFACE_TEXTURE_STYLES[getActiveSurfaceTextureStyleKey()].gloss;
         g.specularMaterial(...toneForColorScheme(30 + 80 * gloss, 30 + 75 * gloss, 30 + 70 * gloss));
         g.shininess(8 + 30 * gloss);

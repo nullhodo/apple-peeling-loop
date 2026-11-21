@@ -387,21 +387,11 @@ function scaleRgb(color, factor) {
 }
 
 /**
- * 選択中の質感で果皮・果肉テクスチャを、あわせてフィルムグレインを生成する関数
- * 模様はキャッシュから取り、配色 (果皮・果肉色) との合成だけを毎回やり直す
+ * 果皮・果肉の色から、テクスチャの差し色一式を作る関数
+ * 差し色はすべて果皮・果肉の色から作り、どの配色でも調和させる
  */
-function generateProceduralTextures() {
-    console.log("[Texture Generator] Creating procedural textures...");
-    const styleKey = getActiveSurfaceTextureStyleKey();
-    const style = SURFACE_TEXTURE_STYLES[styleKey];
-    const patterns = buildSurfaceTexturePatterns(styleKey);
-    const width = APPLE_TEXTURE_WIDTH;
-    const height = APPLE_TEXTURE_HEIGHT;
-
-    const skin = convertHexToRgb(sketchParameters.appleSkinColorHex);
-    const flesh = convertHexToRgb(sketchParameters.appleFleshColorHex);
-    // 差し色はすべて果皮・果肉の色から作り、どの配色でも調和させる
-    const colors = {
+function buildSurfaceTextureColors(skin, flesh) {
+    return {
         skin,
         flesh,
         // 地色はパレットと調和するよう果肉色寄りに、わずかに緑へ寄せる
@@ -416,9 +406,32 @@ function generateProceduralTextures() {
         fleshVein: mixRgb(flesh, toneRgb(200, 205, 150), 0.35),
         fleshTint: mixRgb(flesh, toneRgb(215, 225, 170), 0.45)
     };
+}
+
+/**
+ * 選択中の質感で果皮・果肉テクスチャを、あわせてフィルムグレインを生成する関数
+ * 模様はキャッシュから取り、配色 (果皮・果肉色) との合成だけを毎回やり直す
+ */
+function generateProceduralTextures() {
+    console.log("[Texture Generator] Creating procedural textures...");
+    const styleKey = getActiveSurfaceTextureStyleKey();
+    const style = SURFACE_TEXTURE_STYLES[styleKey];
+    const patterns = buildSurfaceTexturePatterns(styleKey);
+    const width = APPLE_TEXTURE_WIDTH;
+    const height = APPLE_TEXTURE_HEIGHT;
+
+    const flesh = convertHexToRgb(sketchParameters.appleFleshColorHex);
+    const colors = buildSurfaceTextureColors(convertHexToRgb(sketchParameters.appleSkinColorHex), flesh);
 
     appleSkinProceduralTexture = paintSurfaceTexture(appleSkinProceduralTexture, width, height, (index) => style.skin(patterns, index, colors));
     appleFleshProceduralTexture = paintSurfaceTexture(appleFleshProceduralTexture, width, height, (index) => style.flesh(patterns, index, colors));
+    if (sketchParameters.isSkinAlternationEnabled) {
+        const alternateColors = buildSurfaceTextureColors(convertHexToRgb(sketchParameters.alternateSkinColorHex), flesh);
+        appleAlternateSkinProceduralTexture = paintSurfaceTexture(appleAlternateSkinProceduralTexture, width, height, (index) => style.skin(patterns, index, alternateColors));
+    } else if (appleAlternateSkinProceduralTexture) {
+        appleAlternateSkinProceduralTexture.remove();
+        appleAlternateSkinProceduralTexture = null;
+    }
 
     // 全画面フィルムグレイン質感オーバーレイ
     grainNoiseOverlayTexture = createGraphics(256, 256);
