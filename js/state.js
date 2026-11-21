@@ -9,7 +9,7 @@ let sketchParameters = {
     peelCurlCurvature: 1.20,
     peelThicknessRatio: 0.032, // 剥く皮のごく薄い厚み比率 (約3.2%)
     autoRotationSpeed: 1.0,
-    grainIntensity: 0.35,
+    grainIntensity: 0.25,
     backgroundColorHex: "#0d1117",
     appleSkinColorHex: "#c81d25",
     appleFleshColorHex: "#f6ebc6",
@@ -20,7 +20,7 @@ let sketchParameters = {
     autoRandomIntervalMilliseconds: 12000,
     isKnifeVisible: true,
     knifeScale: 1.0,
-    knifeMotionMode: "moving" // "moving" (ナイフが巡る) または "fixed" (ナイフ固定でリンゴ回転)
+    knifeMotionMode: "fixed" // "moving" (ナイフが巡る) または "fixed" (ナイフ固定でリンゴ回転)
 };
 
 // Loop Clock (周期が変わっても位相が連続するよう時刻オフセットを保持)
