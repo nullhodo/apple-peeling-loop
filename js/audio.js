@@ -114,3 +114,38 @@ function updatePeelingAudioFeedback(state) {
         // Ignore transient audio scheduling hiccups
     }
 }
+
+/**
+ * 指定ループ数録画用に、各フレームの描画状態から皮むき音をオフラインで生成する関数
+ * 描画が実時間と違う速さで進んでも、映像の各フレームと同じ時刻に同じ音が鳴る
+ * @param {number[]} sceneTimestamps 各フレームの描画時刻 (computePeelSceneState に渡す時刻)
+ * @param {number} frameRate 映像のフレームレート
+ * @param {number} sampleRate 生成する音声のサンプリング周波数
+ * @returns {Promise<AudioBuffer>}
+ */
+async function renderPeelingAudioOffline(sceneTimestamps, frameRate, sampleRate) {
+    const durationSeconds = sceneTimestamps.length / frameRate;
+    const volumeDecibels = Number(document.getElementById('slider-volume').value);
+    const toneBuffer = await Tone.Offline(() => {
+        Tone.getDestination().volume.value = volumeDecibels;
+        const graph = createPeelingAudioGraph();
+        graph.noise.start(0);
+        let previous = null;
+        sceneTimestamps.forEach((sceneTimestamp, frameIndex) => {
+            const time = frameIndex / frameRate;
+            const targets = computePeelingAudioTargets(computePeelSceneState(sceneTimestamp), previous);
+            if (frameIndex === 0) {
+                // ループの継ぎ目で音量が 0 からフェードインしないよう、最初のフレームは即座にその音量にする
+                graph.gain.gain.setValueAtTime(targets.level, 0);
+                if (targets.isPeeling) {
+                    graph.filter.Q.setValueAtTime(targets.q, 0);
+                    graph.filter.frequency.setValueAtTime(targets.frequency, 0);
+                }
+            } else {
+                applyPeelingAudioTargets(graph, targets, time);
+            }
+            previous = targets;
+        });
+    }, durationSeconds, 2, sampleRate);
+    return toneBuffer.get();
+}

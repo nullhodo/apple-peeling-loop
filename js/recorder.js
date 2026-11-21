@@ -6,6 +6,9 @@
  * - 手動録画: 描画のたびにフレームを実時間のタイムスタンプで送る
  * - 指定ループ数録画: 描画ループを止め、1/60 秒刻みの時刻で描画してはエンコードする (オフライン描画)。
  *   コマ落ちがなく、ちょうど N ループ分の長さで最初と最後がつながる
+ * 効果音は AudioEncoder でエンコードして音声トラックに入れる (効果音をオフにしているときは入れない)。
+ * - 手動録画: Tone.js の出力を MediaStreamTrackProcessor で取り出してそのまま録る
+ * - 指定ループ数録画: 各フレームの描画状態から同じ音を Tone.Offline で生成する
  */
 const RECORDING_FRAME_RATE = 60;
 const RECORDING_BITRATE = 16000000; // 16 Mbps
@@ -17,6 +20,16 @@ const RECORDING_CODEC_CANDIDATES = [
     { codec: 'avc1.4d0033', muxerCodec: 'avc', label: 'H.264' },
     { codec: 'vp09.00.51.08', muxerCodec: 'vp9', label: 'VP9' },
     { codec: 'av01.0.12M.08', muxerCodec: 'av1', label: 'AV1' }
+];
+
+const RECORDING_AUDIO_BITRATE = 192000;
+const RECORDING_AUDIO_CHANNELS = 2;
+const OFFLINE_AUDIO_SAMPLE_RATE = 48000;
+const OFFLINE_AUDIO_BLOCK_FRAMES = 4800;
+// 優先順: AAC → Opus (samplesPerChunk はエンコーダが chunk の長さを付けないときの補い)
+const RECORDING_AUDIO_CODEC_CANDIDATES = [
+    { codec: 'mp4a.40.2', muxerCodec: 'aac', label: 'AAC', samplesPerChunk: 1024 },
+    { codec: 'opus', muxerCodec: 'opus', label: 'Opus', samplesPerChunk: 960 }
 ];
 
 /**
@@ -44,12 +57,16 @@ async function startRecordingPipeline(numberOfLoopsToRecord = 0) {
         return;
     }
 
+    const audioChoice = await selectSupportedAudioCodec(numberOfLoopsToRecord > 0);
+
     isRecordingActive = true;
     targetRecordingLoopCount = numberOfLoopsToRecord;
-    recordingSession = createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoice);
+    recordingSession = createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoice, audioChoice);
+    if (audioChoice && numberOfLoopsToRecord === 0) startRealtimeAudioCapture(recordingSession);
     recordingStartTimestamp = millis();
     showRecordingIndicator(true);
-    console.log(`[Video Recorder] Recording started (${codecChoice.label} ${codecChoice.codec}, ${videoWidth}x${videoHeight}, mp4).`);
+    const audioLabel = audioChoice ? `${audioChoice.label} ${audioChoice.sampleRate}Hz` : 'no audio';
+    console.log(`[Video Recorder] Recording started (${codecChoice.label} ${codecChoice.codec}, ${videoWidth}x${videoHeight}, ${audioLabel}, mp4).`);
 
     if (numberOfLoopsToRecord > 0) {
         await renderLoopRecordingOffline(numberOfLoopsToRecord);
@@ -86,6 +103,37 @@ async function selectSupportedRecordingCodec(videoWidth, videoHeight) {
     return null;
 }
 
+/**
+ * 音声を録れるか調べ、使える音声コーデックを優先順に探す関数 (録れないときは null)
+ * @param {boolean} isOfflineRendering 指定ループ数録画かどうか
+ */
+async function selectSupportedAudioCodec(isOfflineRendering) {
+    if (isPeelingAudioMuted) return null;
+    if (typeof AudioEncoder === 'undefined') {
+        console.warn("[Video Recorder] AudioEncoder が使えないため、音声なしで録画します。");
+        return null;
+    }
+    let sampleRate = OFFLINE_AUDIO_SAMPLE_RATE;
+    if (!isOfflineRendering) {
+        if (!isAudioEngineStarted || Tone.context.state !== 'running' || typeof MediaStreamTrackProcessor === 'undefined') {
+            console.warn("[Video Recorder] 音声エンジンが動いていないか MediaStreamTrackProcessor が使えないため、音声なしで録画します。");
+            return null;
+        }
+        sampleRate = Tone.context.rawContext.sampleRate;
+    }
+    for (const candidate of RECORDING_AUDIO_CODEC_CANDIDATES) {
+        const config = { codec: candidate.codec, sampleRate, numberOfChannels: RECORDING_AUDIO_CHANNELS, bitrate: RECORDING_AUDIO_BITRATE };
+        try {
+            const support = await AudioEncoder.isConfigSupported(config);
+            if (support.supported) return { ...candidate, sampleRate, config };
+        } catch (error) {
+            // 不正なコーデック文字列として扱われた場合は次の候補へ
+        }
+    }
+    console.warn(`[Video Recorder] ${sampleRate}Hz に対応する音声エンコーダが見つからないため、音声なしで録画します。`);
+    return null;
+}
+
 function buildEncoderConfig(candidate, videoWidth, videoHeight) {
     const config = {
         codec: candidate.codec,
@@ -101,17 +149,29 @@ function buildEncoderConfig(candidate, videoWidth, videoHeight) {
 /**
  * エンコーダと mp4 マルチプレクサを用意する関数
  */
-function createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoice) {
+function createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoice, audioChoice) {
     const muxer = new Mp4Muxer.Muxer({
         target: new Mp4Muxer.ArrayBufferTarget(),
         video: { codec: codecChoice.muxerCodec, width: videoWidth, height: videoHeight, frameRate: RECORDING_FRAME_RATE },
+        audio: audioChoice ? { codec: audioChoice.muxerCodec, sampleRate: audioChoice.sampleRate, numberOfChannels: RECORDING_AUDIO_CHANNELS } : undefined,
         fastStart: 'in-memory'
     });
+    const frameDurationMicroseconds = 1e6 / RECORDING_FRAME_RATE;
     const encoder = new VideoEncoder({
-        output: (chunk, metadata) => addEncodedChunkToMuxer(muxer, chunk, metadata),
+        output: (chunk, metadata) => addEncodedChunkToMuxer(muxer, 'video', chunk, metadata, frameDurationMicroseconds),
         error: (error) => console.error("[Video Recorder] Encoding error: ", error)
     });
     encoder.configure(buildEncoderConfig(codecChoice, videoWidth, videoHeight));
+
+    let audioEncoder = null;
+    if (audioChoice) {
+        const audioChunkDurationMicroseconds = audioChoice.samplesPerChunk / audioChoice.sampleRate * 1e6;
+        audioEncoder = new AudioEncoder({
+            output: (chunk, metadata) => addEncodedChunkToMuxer(muxer, 'audio', chunk, metadata, audioChunkDurationMicroseconds),
+            error: (error) => console.error("[Video Recorder] Audio encoding error: ", error)
+        });
+        audioEncoder.configure(audioChoice.config);
+    }
 
     // 偶数サイズへの切り詰めと、WebGL の描画バッファが消える前の取り込みを兼ねた作業用キャンバス
     const frameCanvas = document.createElement('canvas');
@@ -121,23 +181,127 @@ function createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoi
     return {
         sourceCanvas, frameCanvas, frameContext: frameCanvas.getContext('2d'),
         encoder, muxer, frameCount: 0, isCancelled: false, firstFrameTimestamp: null,
+        audioEncoder, audioSampleRate: audioChoice?.sampleRate ?? null, audioCapture: null, audioFrameCursor: null,
         exportSize: { width: videoWidth, height: videoHeight }
     };
 }
 
 /**
  * エンコード済みの chunk を mp4-muxer に渡す関数
- * mp4-muxer は chunk の duration を必須とするが、ブラウザによっては VideoFrame の duration が chunk に引き継がれず null になるため、
- * その場合は 1/60 秒として渡す (フレーム間の長さはタイムスタンプ差から決まり、duration は最後のフレームの長さに使われる)
+ * mp4-muxer は chunk の duration を必須とするが、ブラウザによっては入力の duration が chunk に引き継がれず null になるため、
+ * その場合は fallbackDurationMicroseconds を渡す (chunk 間の長さはタイムスタンプ差から決まり、duration は最後の chunk の長さに使われる)
+ * @param {'video'|'audio'} trackKind
  */
-function addEncodedChunkToMuxer(muxer, chunk, metadata) {
+function addEncodedChunkToMuxer(muxer, trackKind, chunk, metadata, fallbackDurationMicroseconds) {
     if (chunk.duration !== null) {
-        muxer.addVideoChunk(chunk, metadata);
+        if (trackKind === 'video') muxer.addVideoChunk(chunk, metadata);
+        else muxer.addAudioChunk(chunk, metadata);
         return;
     }
     const data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
-    muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, Math.round(1e6 / RECORDING_FRAME_RATE), metadata);
+    const duration = Math.round(fallbackDurationMicroseconds);
+    if (trackKind === 'video') muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, duration, metadata);
+    else muxer.addAudioChunkRaw(data, chunk.type, chunk.timestamp, duration, metadata);
+}
+
+/**
+ * チャンネルごとの音声サンプルを、映像の先頭からの通し位置の時刻で音声エンコーダへ送る関数
+ * @param {Float32Array[]} channelSamples RECORDING_AUDIO_CHANNELS 個の同じ長さの配列
+ */
+function encodePlanarAudioSamples(session, channelSamples) {
+    const numberOfFrames = channelSamples[0].length;
+    if (numberOfFrames === 0) return;
+    const planarData = new Float32Array(numberOfFrames * RECORDING_AUDIO_CHANNELS);
+    channelSamples.forEach((samples, channelIndex) => planarData.set(samples, channelIndex * numberOfFrames));
+    const audioData = new AudioData({
+        format: 'f32-planar',
+        sampleRate: session.audioSampleRate,
+        numberOfFrames,
+        numberOfChannels: RECORDING_AUDIO_CHANNELS,
+        timestamp: Math.round(session.audioFrameCursor * 1e6 / session.audioSampleRate),
+        data: planarData
+    });
+    session.audioEncoder.encode(audioData);
+    audioData.close();
+    session.audioFrameCursor += numberOfFrames;
+}
+
+/**
+ * 手動録画で、Tone.js の出力を取り出して音声エンコーダへ送り続ける処理を始める関数
+ */
+function startRealtimeAudioCapture(session) {
+    const streamDestination = Tone.context.rawContext.createMediaStreamDestination();
+    Tone.Destination.connect(streamDestination);
+    const track = streamDestination.stream.getAudioTracks()[0];
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    session.audioCapture = { streamDestination, track, reader };
+
+    (async () => {
+        while (true) {
+            const { value: audioData, done } = await reader.read();
+            if (done) break;
+            try {
+                encodeCapturedAudioData(session, audioData);
+            } finally {
+                audioData.close();
+            }
+        }
+    })().catch((error) => console.warn("[Video Recorder] Audio capture stopped: ", error));
+}
+
+function stopRealtimeAudioCapture(session) {
+    const capture = session.audioCapture;
+    if (!capture) return;
+    session.audioCapture = null;
+    capture.reader.cancel();
+    capture.track.stop();
+    Tone.Destination.disconnect(capture.streamDestination);
+}
+
+/**
+ * 取り出した音声を、映像の先頭フレームを時刻 0 としてエンコーダへ送る関数
+ */
+function encodeCapturedAudioData(session, audioData) {
+    // 停止後に届いた音と、映像の最初のフレームより前の音は捨てる
+    if (!session.audioCapture || session.firstFrameTimestamp === null) return;
+    if (audioData.sampleRate !== session.audioSampleRate) return;
+
+    if (session.audioFrameCursor === null) {
+        // 音は映像より少し遅れて届き始めるため、その分だけ先頭に無音を入れて映像と時刻をそろえる
+        const startMilliseconds = millis() - session.firstFrameTimestamp - audioData.duration / 1000;
+        if (startMilliseconds < 0) return;
+        const silentFrameCount = Math.round(startMilliseconds / 1000 * session.audioSampleRate);
+        session.audioFrameCursor = 0;
+        encodePlanarAudioSamples(session, Array.from({ length: RECORDING_AUDIO_CHANNELS }, () => new Float32Array(silentFrameCount)));
+    }
+
+    const channelSamples = [];
+    for (let channelIndex = 0; channelIndex < RECORDING_AUDIO_CHANNELS; channelIndex++) {
+        const samples = new Float32Array(audioData.numberOfFrames);
+        const sourcePlane = Math.min(channelIndex, audioData.numberOfChannels - 1);
+        audioData.copyTo(samples, { planeIndex: sourcePlane, format: 'f32-planar' });
+        channelSamples.push(samples);
+    }
+    encodePlanarAudioSamples(session, channelSamples);
+}
+
+/**
+ * 指定ループ数録画で、描画した各フレームの時刻から効果音を生成してエンコーダへ送る関数
+ * @param {number[]} sceneTimestamps 各フレームの描画時刻
+ */
+async function encodeOfflineAudio(session, sceneTimestamps) {
+    console.log("[Video Recorder] Rendering audio offline...");
+    const audioBuffer = await renderPeelingAudioOffline(sceneTimestamps, RECORDING_FRAME_RATE, session.audioSampleRate);
+    const channels = Array.from({ length: RECORDING_AUDIO_CHANNELS },
+        (_, channelIndex) => audioBuffer.getChannelData(Math.min(channelIndex, audioBuffer.numberOfChannels - 1)));
+    session.audioFrameCursor = 0;
+    for (let offset = 0; offset < audioBuffer.length; offset += OFFLINE_AUDIO_BLOCK_FRAMES) {
+        encodePlanarAudioSamples(session, channels.map((samples) => samples.subarray(offset, offset + OFFLINE_AUDIO_BLOCK_FRAMES)));
+        while (session.audioEncoder.encodeQueueSize > 8) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+    }
 }
 
 /**
@@ -181,6 +345,7 @@ async function renderLoopRecordingOffline(loopCount) {
     const totalFrames = Math.max(1, Math.round(recordingDuration / 1000 * RECORDING_FRAME_RATE));
     const sceneStartTimestamp = millis();
     const videoDurationMilliseconds = totalFrames * 1000 / RECORDING_FRAME_RATE;
+    const sceneTimestamps = [];
 
     noLoop();
     muteAudioForOfflineRendering();
@@ -189,6 +354,7 @@ async function renderLoopRecordingOffline(loopCount) {
             offlineRenderTimestamp = sceneStartTimestamp + recordingDuration * frameIndex / totalFrames;
             redraw();
             encodeCurrentCanvasFrame(frameIndex * 1e6 / RECORDING_FRAME_RATE);
+            sceneTimestamps.push(offlineRenderTimestamp);
             // エンコード待ちが溜まりすぎないようにし、合間に HUD を更新する
             while (session.encoder.encodeQueueSize > 4) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -199,6 +365,13 @@ async function renderLoopRecordingOffline(loopCount) {
             }
         }
         updateRecordingDurationDisplay(session.frameCount * 1000 / RECORDING_FRAME_RATE, videoDurationMilliseconds);
+        if (session.audioEncoder && sceneTimestamps.length > 0) {
+            try {
+                await encodeOfflineAudio(session, sceneTimestamps);
+            } catch (error) {
+                console.warn("[Video Recorder] Offline audio rendering failed: ", error);
+            }
+        }
     } finally {
         offlineRenderTimestamp = null;
         loop();
@@ -228,8 +401,13 @@ async function finishRecordingSession() {
     showRecordingIndicator(false);
 
     console.log("[Video Recorder] Finalizing mp4...");
+    stopRealtimeAudioCapture(session);
     await session.encoder.flush();
     session.encoder.close();
+    if (session.audioEncoder) {
+        await session.audioEncoder.flush();
+        session.audioEncoder.close();
+    }
     session.muxer.finalize();
     if (session.frameCount === 0) {
         console.warn("[Video Recorder] No frames were recorded.");
