@@ -108,7 +108,7 @@ function createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoi
         fastStart: 'in-memory'
     });
     const encoder = new VideoEncoder({
-        output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata),
+        output: (chunk, metadata) => addEncodedChunkToMuxer(muxer, chunk, metadata),
         error: (error) => console.error("[Video Recorder] Encoding error: ", error)
     });
     encoder.configure(buildEncoderConfig(codecChoice, videoWidth, videoHeight));
@@ -126,13 +126,32 @@ function createRecordingSession(sourceCanvas, videoWidth, videoHeight, codecChoi
 }
 
 /**
+ * エンコード済みの chunk を mp4-muxer に渡す関数
+ * mp4-muxer は chunk の duration を必須とするが、ブラウザによっては VideoFrame の duration が chunk に引き継がれず null になるため、
+ * その場合は 1/60 秒として渡す (フレーム間の長さはタイムスタンプ差から決まり、duration は最後のフレームの長さに使われる)
+ */
+function addEncodedChunkToMuxer(muxer, chunk, metadata) {
+    if (chunk.duration !== null) {
+        muxer.addVideoChunk(chunk, metadata);
+        return;
+    }
+    const data = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(data);
+    muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, Math.round(1e6 / RECORDING_FRAME_RATE), metadata);
+}
+
+/**
  * 今のキャンバスの内容を1フレームとしてエンコーダへ送る関数
  * @param {number} timestampMicroseconds 動画内の時刻
  */
 function encodeCurrentCanvasFrame(timestampMicroseconds) {
     const session = recordingSession;
     session.frameContext.drawImage(session.sourceCanvas, 0, 0);
-    const frame = new VideoFrame(session.frameCanvas, { timestamp: Math.round(timestampMicroseconds) });
+    // duration は chunk に引き継がれ、mp4-muxer に渡される (addEncodedChunkToMuxer を参照)
+    const frame = new VideoFrame(session.frameCanvas, {
+        timestamp: Math.round(timestampMicroseconds),
+        duration: Math.round(1e6 / RECORDING_FRAME_RATE)
+    });
     session.encoder.encode(frame, { keyFrame: session.frameCount % RECORDING_KEYFRAME_INTERVAL === 0 });
     frame.close();
     session.frameCount += 1;
